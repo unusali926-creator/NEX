@@ -2,31 +2,31 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- AI Network Access (Groq LLaMA Engine) -->
+    <!-- AI Network & Groq LLaMA Access -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- Voice Cadence (Microphone Access) -->
+    <!-- Voice Cadence & Audio Input -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-    <!-- Hardware Actions (Flashlight / Torch Trigger) -->
+    <!-- Hardware Controls: Flashlight & Volume -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
 
-    <!-- System & Notification Permissions -->
+    <!-- 24/7 Always-On Background Permissions (Android 14) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
-    <!-- Android 11+ Package Visibility for WhatsApp, YouTube, and System Apps -->
+    <!-- Package Visibility for Universal App Launcher (Instagram, Spotify, Chrome, etc.) -->
     <queries>
-        <package android:name="com.whatsapp" />
-        <package android:name="com.google.android.youtube" />
-        <intent>
-            <action android:name="android.media.action.IMAGE_CAPTURE" />
-        </intent>
         <intent>
             <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
         </intent>
     </queries>
 
@@ -38,7 +38,7 @@
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
 
-        <!-- Main HUD Screen Activity -->
+        <!-- Arc Reactor UI -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -50,6 +50,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 24/7 Background Always-On Service -->
+        <service
+            android:name=".NexCoreService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
         <!-- Private WhatsApp & SMS Notification Sentinel -->
         <service
