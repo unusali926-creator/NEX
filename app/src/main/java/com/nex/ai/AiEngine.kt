@@ -13,7 +13,7 @@ import java.net.URL
 object AiEngine {
 
     // Groq Console (console.groq.com) se free API Key yahan paste karein:
-    var apiKey: String = "YOUR_GROQ_API_KEY_HERE"
+    var apiKey: String = "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"
 
     private const val GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
     private const val MODEL_NAME = "llama-3.1-8b-instant"
