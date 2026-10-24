@@ -21,7 +21,10 @@ class VoiceManager(
     private var textToSpeech: TextToSpeech? = null
     private var speechRecognizer: SpeechRecognizer? = null
     private val mainHandler = Handler(Looper.getMainLooper())
+
     var isSpeaking: Boolean = false
+        private set
+    var isContinuousMode: Boolean = false
         private set
 
     init {
@@ -31,13 +34,21 @@ class VoiceManager(
     private fun initTTS() {
         textToSpeech = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                // Calm, British / FRIDAY cadence
-                val result = textToSpeech?.setLanguage(Locale.UK)
-                if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    textToSpeech?.language = Locale.US
+                // Natural FRIDAY British Female Cadence
+                textToSpeech?.language = Locale.UK
+
+                // Auto-select female British voice if available on device
+                val femaleVoice = textToSpeech?.voices?.firstOrNull { voice ->
+                    voice.locale.language == "en" &&
+                    (voice.name.contains("female", ignoreCase = true) || voice.name.contains("en-gb", ignoreCase = true)) &&
+                    !voice.isNetworkConnectionRequired
                 }
-                textToSpeech?.setPitch(0.95f) // Calm, sophisticated pitch
-                textToSpeech?.setSpeechRate(0.95f) // Controlled, clear cadence
+                if (femaleVoice != null) {
+                    textToSpeech?.voice = femaleVoice
+                }
+
+                textToSpeech?.setPitch(1.08f) // Clear, polite female tone
+                textToSpeech?.setSpeechRate(0.98f) // Sophisticated pacing
 
                 textToSpeech?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {
@@ -48,23 +59,41 @@ class VoiceManager(
                     override fun onDone(utteranceId: String?) {
                         isSpeaking = false
                         onStateUpdate("IDLE")
+                        // CADENCE LOOP: Jawab bolne ke baad turant sunna shuru kare
+                        if (isContinuousMode) {
+                            mainHandler.postDelayed({
+                                startListening()
+                            }, 350)
+                        }
                     }
 
                     @Deprecated("Deprecated in Java")
                     override fun onError(utteranceId: String?) {
                         isSpeaking = false
                         onStateUpdate("IDLE")
+                        if (isContinuousMode) {
+                            mainHandler.postDelayed({ startListening() }, 500)
+                        }
                     }
                 })
             }
         }
     }
 
+    fun startContinuousCadence() {
+        isContinuousMode = true
+        speak("Nex online, listening to your commands, Sir.")
+    }
+
+    fun stopContinuousCadence() {
+        isContinuousMode = false
+        stopListening()
+        destroyRecognizer()
+        speak("Systems entering standby mode, Sir.")
+    }
+
     fun startListening() {
-        if (isSpeaking) {
-            // Echo Shield: Mic tab tak nahi khulega jab tak Nex bol raha ho
-            return
-        }
+        if (isSpeaking) return
 
         mainHandler.post {
             try {
@@ -84,16 +113,11 @@ class VoiceManager(
 
                         override fun onError(error: Int) {
                             onStateUpdate("IDLE")
-                            // Error Transparency: Chup na baithkar bolkar bataye
-                            when (error) {
-                                SpeechRecognizer.ERROR_NETWORK,
-                                SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> {
-                                    speak("Sir, connection interrupted. Network check karein.")
-                                }
-                                SpeechRecognizer.ERROR_NO_MATCH,
-                                SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
-                                    speak("Sir, aawaz saaf nahi aayi. Kripya dobara bolein.")
-                                }
+                            // Continuous mode me chupchap dobara mic open kare, bar-bar disturb na kare
+                            if (isContinuousMode && !isSpeaking) {
+                                mainHandler.postDelayed({
+                                    startListening()
+                                }, 600)
                             }
                         }
 
@@ -104,7 +128,9 @@ class VoiceManager(
                                 onSpeechRecognized(query)
                             } else {
                                 onStateUpdate("IDLE")
-                                speak("Sir, aawaz decode nahi ho payi.")
+                                if (isContinuousMode) {
+                                    mainHandler.postDelayed({ startListening() }, 500)
+                                }
                             }
                         }
 
@@ -113,28 +139,33 @@ class VoiceManager(
                     })
                 }
 
+                // Bilingual Indian English + Hinglish + Hindi recognition
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-IN")
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "en-IN")
+                    putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf("hi-IN", "en-US"))
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
                 }
 
                 speechRecognizer?.startListening(intent)
             } catch (e: Exception) {
                 onStateUpdate("IDLE")
-                speak("Sir, audio interface me rukawat aayi hai.")
+                if (isContinuousMode) {
+                    mainHandler.postDelayed({ startListening() }, 1000)
+                }
             }
         }
     }
 
     fun speak(text: String) {
         mainHandler.post {
-            // Bolne se pehle mic ko mute/stop karein
             stopListening()
             val params = Bundle().apply {
-                putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "NEX_SPEECH_ID")
+                putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "NEX_CADENCE_ID")
             }
-            textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, params, "NEX_SPEECH_ID")
+            textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, params, "NEX_CADENCE_ID")
         }
     }
 
@@ -154,6 +185,7 @@ class VoiceManager(
     }
 
     fun shutdown() {
+        isContinuousMode = false
         stopListening()
         destroyRecognizer()
         textToSpeech?.stop()
