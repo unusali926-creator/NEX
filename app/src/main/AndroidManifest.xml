@@ -9,26 +9,23 @@
     <!-- Voice Cadence & Audio Input -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-    <!-- Hardware Controls: Flashlight & Volume -->
+    <!-- Hardware Controls: Camera, Torch & Volume -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
 
-    <!-- 24/7 Always-On Background Permissions (Android 14) -->
+    <!-- 24/7 Always-On Background Permissions -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
-    <!-- Package Visibility for Universal App Launcher (Instagram, Spotify, Chrome, etc.) -->
-    <queries>
-        <intent>
-            <action android:name="android.intent.action.MAIN" />
-            <category android:name="android.intent.category.LAUNCHER" />
-        </intent>
-    </queries>
+    <!-- MASTER DEVICE ACCESS: Allows Nex to see, launch and control ALL installed apps -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:allowBackup="true"
