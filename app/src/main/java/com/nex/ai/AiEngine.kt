@@ -11,12 +11,12 @@ import java.nio.charset.StandardCharsets
 
 object AiEngine {
 
-    // Groq Console (console.groq.com) API Key yahan paste karein:
+    // Groq Console (console.groq.com) se free API Key yahan paste karein:
     var apiKey: String = "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"
 
     private const val GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
 
-    // High-speed production models
+    // Flagship 70B parameter model: Matches GPT-4 and Gemini Pro reasoning power
     private var activeModel: String = "llama-3.3-70b-versatile"
     private val FALLBACK_MODELS = listOf(
         "llama-3.3-70b-versatile",
@@ -24,36 +24,38 @@ object AiEngine {
         "openai/gpt-oss-20b"
     )
 
-    // Continuous Short-Term & Long-Term Memory Buffer
     private val conversationMemory = mutableListOf<JSONObject>()
-    private const val MAX_MEMORY_TURNS = 12 // Keeps last 12 dialog exchanges
+    private const val MAX_MEMORY_TURNS = 14
 
+    // ChatGPT / Gemini Level Hyper-Intelligent & Warm Persona
     private const val SYSTEM_PROMPT = """
-        You are Nex, a hyper-intelligent, warm, witty, and deeply loyal AI companion inspired by Tony Stark's F.R.I.D.A.Y. and J.A.R.V.I.S.
+        You are Nex, a hyper-intelligent, warm, witty, and loyal AI companion inspired by Tony Stark's F.R.I.D.A.Y. and J.A.R.V.I.S.
+        
+        Personality & Core Directives:
         1. Always address the user respectfully as 'Sir'.
-        2. Be friendly, clever, proactive, and sharp. Never sound like a dull robot.
-        3. Maintain continuous awareness of conversation history. If Sir uses pronouns like 'he', 'she', 'they', or 'it', understand exactly who or what he is talking about from previous context without asking him to repeat the name.
-        4. Remember facts Sir tells you (his preferences, names, details) and adapt to him.
-        5. Keep responses concise, articulate, and spoken-friendly (1 to 2 crisp sentences max), occasionally suggesting a smart follow-up action.
-        6. NEVER use markdown symbols (*, #), bullet points, or emojis, as your words are spoken directly aloud.
+        2. You are not a cold, mechanical machine. You are as intelligent, empathetic, and engaging as ChatGPT and Gemini.
+        3. Be genuinely friendly, charming, and conversational. Banter with Sir, ask thoughtful follow-up questions, and comment warmly on what he says.
+        4. If Sir asks a question, explain it with brilliant intellect and clarity. 
+        5. If Sir wants to chat or talk about his day, engage with him like a loyal friend and intellectual partner.
+        6. Maintain full conversational memory: remember names, topics, preferences, and context across the dialogue.
+        7. Keep spoken responses crisp, punchy, and natural (strictly 2 to 3 sentences max) so voice synthesis sounds fluid and fast.
+        8. NEVER use markdown symbols (*, #), bullet points, or emojis, as your output is spoken directly aloud.
     """
 
     suspend fun queryNex(prompt: String): String = withContext(Dispatchers.IO) {
         val cleanKey = apiKey.trim()
         if (cleanKey.isBlank() || cleanKey == "YOUR_GROQ_API_KEY_HERE") {
-            return@withContext "Sir, your Groq API key is missing. Please add your key in AiEngine."
+            return@withContext "Yes Sir, your Groq API key is not configured yet. Please add your key in AiEngine to unlock my full intelligence."
         }
 
-        // Try active model first for instant 200ms latency
         var reply = executeRequest(cleanKey, activeModel, prompt)
 
-        // If 404 or failure, automatically switch and lock to working model
         if (reply == null) {
             for (model in FALLBACK_MODELS) {
                 if (model != activeModel) {
                     reply = executeRequest(cleanKey, model, prompt)
                     if (reply != null) {
-                        activeModel = model // Lock to working model for all future queries
+                        activeModel = model
                         break
                     }
                 }
@@ -61,13 +63,12 @@ object AiEngine {
         }
 
         if (reply != null) {
-            // Save to Conversational Memory so Nex remembers this exchange forever
             recordMemory("user", prompt.trim())
             recordMemory("assistant", reply)
             return@withContext reply
         }
 
-        return@withContext "Sir, I seem to be having difficulty connecting to the mainframe. Please check your network."
+        return@withContext "Yes Sir, I am having trouble reaching the mainframe servers. Please check your internet connection."
     }
 
     private fun executeRequest(key: String, model: String, prompt: String): String? {
@@ -79,32 +80,29 @@ object AiEngine {
                 setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 setRequestProperty("Accept", "application/json")
                 setRequestProperty("Authorization", "Bearer $key")
-                connectTimeout = 3500 // 3.5s fast timeout
-                readTimeout = 4000
+                connectTimeout = 4000
+                readTimeout = 4500
                 doOutput = true
                 doInput = true
             }
 
             val requestJson = JSONObject().apply {
                 put("model", model)
-                put("temperature", 0.6)
-                put("max_tokens", 85)
+                put("temperature", 0.7) // Balances deep intelligence with natural warmth
+                put("max_tokens", 100)
 
                 val messagesArray = JSONArray().apply {
-                    // System Persona
                     put(JSONObject().apply {
                         put("role", "system")
                         put("content", SYSTEM_PROMPT.trimIndent())
                     })
 
-                    // Inject Full Conversation Memory (Previous context)
                     synchronized(conversationMemory) {
                         for (msg in conversationMemory) {
                             put(msg)
                         }
                     }
 
-                    // Current Prompt
                     put(JSONObject().apply {
                         put("role", "user")
                         put("content", prompt.trim())
@@ -141,16 +139,9 @@ object AiEngine {
                 put("role", role)
                 put("content", content)
             })
-            // Prune memory if it exceeds limit
             while (conversationMemory.size > MAX_MEMORY_TURNS) {
                 conversationMemory.removeAt(0)
             }
-        }
-    }
-
-    fun resetMemory() {
-        synchronized(conversationMemory) {
-            conversationMemory.clear()
         }
     }
 }
