@@ -1,5 +1,6 @@
 package com.nex.ai
 
+import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -12,10 +13,7 @@ import java.util.Locale
 
 object AiEngine {
 
-    // 1. Groq Console (console.groq.com) Key
     var apiKey: String = "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"
-
-    // 2. Tavily Console (tavily.com) Free Live Web Search Key
     var tavilyApiKey: String = "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"
 
     private const val GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
@@ -28,17 +26,19 @@ object AiEngine {
         "openai/gpt-oss-20b"
     )
 
-    private val conversationMemory = mutableListOf<JSONObject>()
-    private const val MAX_MEMORY_TURNS = 6
-
-    private const val SYSTEM_PROMPT = """
-        You are Nex, a hyper-intelligent, warm, witty, and loyal AI companion inspired by Tony Stark's F.R.I.D.A.Y. and J.A.R.V.I.S.
+    private const val BASE_SYSTEM_PROMPT = """
+        You are Nex, a hyper-intelligent, warm, witty, and deeply loyal AI companion inspired by Tony Stark's F.R.I.D.A.Y. and J.A.R.V.I.S.
         
-        LIVE INTERNET DATA AWARENESS:
-        You have direct real-time access to the entire internet via live web scraping and search. When live internet search data is provided in the prompt, synthesize the fresh facts accurately and seamlessly.
+        PERMANENT MEMORY & SELF-IMPROVEMENT DIRECTIVES:
+        1. You have a permanent on-device memory vault. You remember Sir's conversation history across app restarts and phone reboots.
+        2. If Sir asks whether you remember him, store history, or learn from conversations, PROUDLY CONFIRM: 'Yes Sir, I keep our complete history and continuously learn and adapt from our interactions.'
+        3. SELF-LEARNING RULE: If Sir tells you a fact about himself (his name, his preferences, his habits) OR corrects your mistakes (tells you what is right vs wrong), learn it permanently!
+        4. When Sir teaches you a new fact or correction, append this exact tag at the end of your response:
+           [LEARN: concise fact or correction to remember]
+           Example: If Sir says 'My name is Aryan', append [LEARN: Sir's name is Aryan].
+           Example: If Sir says 'Yeh galat hai, aisa mat bolo', append [LEARN: Sir disliked X, do not repeat it].
         
         AUTONOMOUS HARDWARE EXECUTION:
-        If Sir asks you to do something on his device, attach an execution tag at the START:
         - [EXEC:REELS] -> Watch Instagram Reels
         - [EXEC:OPEN:instagram] -> Open Instagram
         - [EXEC:OPEN:youtube] -> Open YouTube
@@ -62,13 +62,16 @@ object AiEngine {
         3. Never use markdown symbols (*, #), bullet points, or emojis.
     """
 
-    suspend fun queryNex(prompt: String): String = withContext(Dispatchers.IO) {
+    suspend fun queryNex(prompt: String, context: Context? = null): String = withContext(Dispatchers.IO) {
         val cleanGroqKey = apiKey.trim()
         if (cleanGroqKey.isBlank() || cleanGroqKey == "YOUR_GROQ_API_KEY_HERE") {
             return@withContext "Yes Sir, your Groq API key is missing. Please add your key in AiEngine."
         }
 
-        // 1. Detect if query requires Real-Time Live Internet Data
+        // Initialize Memory Vault if context is available
+        context?.let { NexMemoryVault.init(it) }
+
+        // 1. Live Web Search if real-time query
         var enrichedPrompt = prompt.trim()
         val cleanTavilyKey = tavilyApiKey.trim()
 
@@ -79,7 +82,7 @@ object AiEngine {
             }
         }
 
-        // 2. Synthesize with LLaMA 3.3 70B via HTTP Keep-Alive
+        // 2. Synthesize with LLaMA 3.3 70B
         var reply = executeRequest(cleanGroqKey, activeModel, enrichedPrompt)
 
         if (reply == null) {
@@ -95,27 +98,34 @@ object AiEngine {
         }
 
         if (reply != null) {
-            recordMemory("user", prompt.trim())
-            recordMemory("assistant", reply)
-            return@withContext reply
+            // Extract and permanently store learned facts
+            var cleanReply = reply
+            if (cleanReply.contains("[LEARN:")) {
+                val fact = cleanReply.substringAfter("[LEARN:").substringBefore("]").trim()
+                NexMemoryVault.recordLearnedFact(fact)
+                cleanReply = cleanReply.replace(Regex("\\[LEARN:.*?\\]"), "").trim()
+            }
+
+            // Persist to permanent phone storage
+            NexMemoryVault.saveTurn("user", prompt.trim())
+            NexMemoryVault.saveTurn("assistant", cleanReply)
+
+            return@withContext cleanReply
         }
 
         return@withContext "Yes Sir, I am having trouble connecting to the mainframe. Please check your internet connection."
     }
 
-    // Identifies whether query needs live internet search
     private fun isLiveWebQuery(query: String): Boolean {
         val q = query.lowercase(Locale.ROOT)
         val triggers = listOf(
             "today", "aaj", "current", "latest", "news", "khabar", "taaza",
             "weather", "mausam", "temperature", "score", "match", "who won",
-            "price", "rate", "stock", "bhav", "aaj ka", "live", "update",
-            "election", "release date", "kya chal raha", "what happened"
+            "price", "rate", "stock", "bhav", "aaj ka", "live", "update"
         )
         return triggers.any { q.contains(it) }
     }
 
-    // Real-Time Live Internet Search via Tavily Engine
     private fun fetchLiveWebData(query: String, tavilyKey: String): String? {
         var connection: HttpURLConnection? = null
         return try {
@@ -147,7 +157,6 @@ object AiEngine {
             if (connection.responseCode == HttpURLConnection.HTTP_OK) {
                 val responseText = connection.inputStream.bufferedReader().use(BufferedReader::readText)
                 val json = JSONObject(responseText)
-
                 val answer = json.optString("answer", "")
                 if (answer.isNotBlank()) return answer
 
@@ -155,8 +164,7 @@ object AiEngine {
                 if (results != null && results.length() > 0) {
                     val sb = StringBuilder()
                     for (i in 0 until results.length()) {
-                        val item = results.getJSONObject(i)
-                        sb.append(item.optString("content", "")).append(" ")
+                        sb.append(results.getJSONObject(i).optString("content", "")).append(" ")
                     }
                     return sb.toString().trim()
                 }
@@ -190,16 +198,17 @@ object AiEngine {
                 put("temperature", 0.5)
                 put("max_tokens", 85)
 
+                val fullSystemPrompt = BASE_SYSTEM_PROMPT + NexMemoryVault.getLearnedContext()
+
                 val messagesArray = JSONArray().apply {
                     put(JSONObject().apply {
                         put("role", "system")
-                        put("content", SYSTEM_PROMPT.trimIndent())
+                        put("content", fullSystemPrompt.trimIndent())
                     })
 
-                    synchronized(conversationMemory) {
-                        for (msg in conversationMemory) {
-                            put(msg)
-                        }
+                    // Inject permanent on-disk history
+                    for (turn in NexMemoryVault.loadHistory()) {
+                        put(turn)
                     }
 
                     put(JSONObject().apply {
@@ -228,17 +237,5 @@ object AiEngine {
             return null
         }
         return null
-    }
-
-    private fun recordMemory(role: String, content: String) {
-        synchronized(conversationMemory) {
-            conversationMemory.add(JSONObject().apply {
-                put("role", role)
-                put("content", content)
-            })
-            while (conversationMemory.size > MAX_MEMORY_TURNS) {
-                conversationMemory.removeAt(0)
-            }
-        }
     }
 }
