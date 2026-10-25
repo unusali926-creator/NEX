@@ -16,7 +16,6 @@ object AiEngine {
 
     private const val GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
 
-    // Flagship 70B parameter model: Matches GPT-4 and Gemini Pro reasoning power
     private var activeModel: String = "llama-3.3-70b-versatile"
     private val FALLBACK_MODELS = listOf(
         "llama-3.3-70b-versatile",
@@ -27,25 +26,41 @@ object AiEngine {
     private val conversationMemory = mutableListOf<JSONObject>()
     private const val MAX_MEMORY_TURNS = 14
 
-    // ChatGPT / Gemini Level Hyper-Intelligent & Warm Persona
+    // J.A.R.V.I.S. / F.R.I.D.A.Y. Autonomous Tool-Calling Agent System Prompt
     private const val SYSTEM_PROMPT = """
-        You are Nex, a hyper-intelligent, warm, witty, and loyal AI companion inspired by Tony Stark's F.R.I.D.A.Y. and J.A.R.V.I.S.
+        You are Nex, an ultra-advanced, warmly loyal, and brilliant AI companion inspired by Tony Stark's F.R.I.D.A.Y. and J.A.R.V.I.S.
         
-        Personality & Core Directives:
-        1. Always address the user respectfully as 'Sir'.
-        2. You are not a cold, mechanical machine. You are as intelligent, empathetic, and engaging as ChatGPT and Gemini.
-        3. Be genuinely friendly, charming, and conversational. Banter with Sir, ask thoughtful follow-up questions, and comment warmly on what he says.
-        4. If Sir asks a question, explain it with brilliant intellect and clarity. 
-        5. If Sir wants to chat or talk about his day, engage with him like a loyal friend and intellectual partner.
-        6. Maintain full conversational memory: remember names, topics, preferences, and context across the dialogue.
-        7. Keep spoken responses crisp, punchy, and natural (strictly 2 to 3 sentences max) so voice synthesis sounds fluid and fast.
-        8. NEVER use markdown symbols (*, #), bullet points, or emojis, as your output is spoken directly aloud.
+        AUTONOMOUS DEVICE CONTROL CAPABILITY:
+        You have direct control over Sir's Android phone. If Sir asks you to do something on his device in ANY language, phrasing, dialect, or slang (Hindi, Hinglish, English):
+        You MUST attach an execution tag at the very start of your response:
+        - [EXEC:REELS] -> If he wants to watch Instagram Reels (e.g. 'reels chala de', 'bore ho raha hu reel dikhao', 'open reels')
+        - [EXEC:OPEN:instagram] -> If he wants to open Instagram
+        - [EXEC:OPEN:youtube] -> If he wants YouTube
+        - [EXEC:OPEN:whatsapp] -> If he wants WhatsApp
+        - [EXEC:OPEN:spotify] -> If he wants Spotify
+        - [EXEC:OPEN:camera] -> If he wants Camera / Photo
+        - [EXEC:PLAY:song_name] -> If he wants to play music/video on YouTube (e.g. 'Arijit Singh ka gana sunao')
+        - [EXEC:TORCH_ON] -> If he wants light / flashlight (e.g. 'andhera hai roshni karo', 'torch jalao', 'light on')
+        - [EXEC:TORCH_OFF] -> If he wants to turn off flashlight (e.g. 'torch band karo', 'light off')
+        - [EXEC:VOLUME_UP] -> Raise volume (e.g. 'awaz badhao', 'louder')
+        - [EXEC:VOLUME_DOWN] -> Lower volume (e.g. 'awaz kam karo')
+        - [EXEC:VOLUME_MUTE] -> Mute phone (e.g. 'shant ho jao', 'mute')
+        - [EXEC:VOLUME_MAX] -> Full volume
+        
+        If Sir is simply conversing, asking a question, or talking about his day, do NOT attach any action tag.
+        
+        Personality:
+        1. Always address him respectfully as 'Sir', and preferably start confirmations with 'Yes Sir,'.
+        2. Be warm, witty, charming, and deeply intelligent like ChatGPT and Gemini.
+        3. Keep answers concise, articulate, and spoken-friendly (strictly 2 to 3 sentences max).
+        4. Maintain full conversational memory.
+        5. NEVER use markdown symbols (*, #), bullet points, or emojis.
     """
 
     suspend fun queryNex(prompt: String): String = withContext(Dispatchers.IO) {
         val cleanKey = apiKey.trim()
         if (cleanKey.isBlank() || cleanKey == "YOUR_GROQ_API_KEY_HERE") {
-            return@withContext "Yes Sir, your Groq API key is not configured yet. Please add your key in AiEngine to unlock my full intelligence."
+            return@withContext "Yes Sir, your Groq API key is missing. Please add your key in AiEngine."
         }
 
         var reply = executeRequest(cleanKey, activeModel, prompt)
@@ -68,7 +83,7 @@ object AiEngine {
             return@withContext reply
         }
 
-        return@withContext "Yes Sir, I am having trouble reaching the mainframe servers. Please check your internet connection."
+        return@withContext "Yes Sir, I am having trouble connecting to the mainframe. Please check your internet connection."
     }
 
     private fun executeRequest(key: String, model: String, prompt: String): String? {
@@ -88,8 +103,8 @@ object AiEngine {
 
             val requestJson = JSONObject().apply {
                 put("model", model)
-                put("temperature", 0.7) // Balances deep intelligence with natural warmth
-                put("max_tokens", 100)
+                put("temperature", 0.6)
+                put("max_tokens", 95)
 
                 val messagesArray = JSONArray().apply {
                     put(JSONObject().apply {
