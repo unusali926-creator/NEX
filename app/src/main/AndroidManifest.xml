@@ -2,27 +2,27 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- AI Network & Groq LLaMA Access -->
+    <!-- Network & AI Access -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- Voice Cadence & Audio Input -->
+    <!-- Audio & Microphone -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-
-    <!-- Hardware Controls: Camera, Torch & Volume -->
-    <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <!-- Hardware Optics & Torch -->
+    <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
 
-    <!-- 24/7 Always-On Background Permissions -->
+    <!-- 24/7 Background Keep-Alive -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
-    <!-- Full Device Access & Package Visibility -->
+    <!-- Master Device Control & Package Visibility -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
@@ -35,7 +35,7 @@
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
 
-        <!-- Arc Reactor UI -->
+        <!-- Arc Reactor Main UI -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -54,4 +54,28 @@
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
-        <!-- Master Accessibility Service (God-Mode Phone
+        <!-- Master Accessibility Service (God-Mode Phone Controller) -->
+        <service
+            android:name=".NexAccessibilityService"
+            android:exported="true"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!-- Private WhatsApp & SMS Sentinel -->
+        <service
+            android:name=".NotificationSentinelService"
+            android:exported="true"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+    </application>
+</manifest>
