@@ -2,6 +2,8 @@ package com.nex.ai
 
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -38,9 +40,17 @@ class VoiceManager(
         textToSpeech = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 isTtsReady = true
+
+                // CRITICAL FOR BACKGROUND AUDIO: Grants Assistant-level rights to play audio when screen is OFF
+                val audioAttributes = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+                textToSpeech?.setAudioAttributes(audioAttributes)
+
                 textToSpeech?.language = Locale.UK
 
-                // Select female voice if available
+                // Auto-select female British FRIDAY voice
                 textToSpeech?.voices?.firstOrNull { voice ->
                     voice.locale.language == "en" &&
                     (voice.name.contains("female", ignoreCase = true) || voice.name.contains("en-gb", ignoreCase = true))
@@ -57,8 +67,7 @@ class VoiceManager(
 
                     override fun onDone(utteranceId: String?) {
                         isSpeaking = false
-                        onStateUpdate("IDLE", "Online and standing by, Sir.")
-                        // CADENCE: Restart listening immediately after speaking
+                        onStateUpdate("IDLE", "Standing by, Sir.")
                         if (isContinuousMode) {
                             mainHandler.postDelayed({
                                 startListening()
@@ -76,7 +85,6 @@ class VoiceManager(
                     }
                 })
 
-                // If speech was requested before TTS loaded, speak it now!
                 pendingSpeech?.let { text ->
                     val queued = text
                     pendingSpeech = null
@@ -108,7 +116,7 @@ class VoiceManager(
                 destroyRecognizer()
 
                 if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-                    onStateUpdate("ERROR", "Speech recognizer unavailable on this device.")
+                    onStateUpdate("ERROR", "Speech recognizer unavailable.")
                     return@post
                 }
 
@@ -126,11 +134,11 @@ class VoiceManager(
                         }
 
                         override fun onError(error: Int) {
-                            // Silent recovery in continuous mode so it never goes dead
+                            // Seamless re-arming in continuous mode
                             if (isContinuousMode && !isSpeaking) {
                                 mainHandler.postDelayed({
                                     startListening()
-                                }, 500)
+                                }, 450)
                             } else {
                                 onStateUpdate("IDLE", "Standing by.")
                             }
@@ -144,7 +152,7 @@ class VoiceManager(
                                 onSpeechRecognized(query)
                             } else {
                                 if (isContinuousMode) {
-                                    mainHandler.postDelayed({ startListening() }, 400)
+                                    mainHandler.postDelayed({ startListening() }, 350)
                                 }
                             }
                         }
@@ -154,6 +162,7 @@ class VoiceManager(
                     })
                 }
 
+                // Bilingual Indian English + Hindi Speech Recognizer
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-IN")
@@ -174,15 +183,17 @@ class VoiceManager(
 
     fun speak(text: String) {
         if (!isTtsReady) {
-            // Queue speech until TTS finishes loading
             pendingSpeech = text
             return
         }
 
         mainHandler.post {
             stopListening()
+            // High-priority audio parameters to guarantee sound output in background & screen off
             val params = Bundle().apply {
                 putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "NEX_SPEECH_ID")
+                putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
+                putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
             }
             textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, params, "NEX_SPEECH_ID")
         }
