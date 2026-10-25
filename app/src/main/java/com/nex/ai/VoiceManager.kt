@@ -15,12 +15,15 @@ import java.util.Locale
 class VoiceManager(
     private val context: Context,
     private val onSpeechRecognized: (String) -> Unit,
-    private val onStateUpdate: (String) -> Unit
+    private val onStateUpdate: (state: String, detail: String) -> Unit
 ) {
 
     private var textToSpeech: TextToSpeech? = null
     private var speechRecognizer: SpeechRecognizer? = null
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    private var isTtsReady: Boolean = false
+    private var pendingSpeech: String? = null
 
     var isSpeaking: Boolean = false
         private set
@@ -34,32 +37,28 @@ class VoiceManager(
     private fun initTTS() {
         textToSpeech = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                // Natural FRIDAY British Female Cadence
+                isTtsReady = true
                 textToSpeech?.language = Locale.UK
 
-                // Auto-select female British voice if available on device
-                val femaleVoice = textToSpeech?.voices?.firstOrNull { voice ->
+                // Select female voice if available
+                textToSpeech?.voices?.firstOrNull { voice ->
                     voice.locale.language == "en" &&
-                    (voice.name.contains("female", ignoreCase = true) || voice.name.contains("en-gb", ignoreCase = true)) &&
-                    !voice.isNetworkConnectionRequired
-                }
-                if (femaleVoice != null) {
-                    textToSpeech?.voice = femaleVoice
-                }
+                    (voice.name.contains("female", ignoreCase = true) || voice.name.contains("en-gb", ignoreCase = true))
+                }?.let { textToSpeech?.voice = it }
 
-                textToSpeech?.setPitch(1.08f) // Clear, polite female tone
-                textToSpeech?.setSpeechRate(0.98f) // Sophisticated pacing
+                textToSpeech?.setPitch(1.05f)
+                textToSpeech?.setSpeechRate(0.98f)
 
                 textToSpeech?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {
                         isSpeaking = true
-                        onStateUpdate("SPEAKING")
+                        onStateUpdate("SPEAKING", "Nex is responding...")
                     }
 
                     override fun onDone(utteranceId: String?) {
                         isSpeaking = false
-                        onStateUpdate("IDLE")
-                        // CADENCE LOOP: Jawab bolne ke baad turant sunna shuru kare
+                        onStateUpdate("IDLE", "Online and standing by, Sir.")
+                        // CADENCE: Restart listening immediately after speaking
                         if (isContinuousMode) {
                             mainHandler.postDelayed({
                                 startListening()
@@ -70,26 +69,35 @@ class VoiceManager(
                     @Deprecated("Deprecated in Java")
                     override fun onError(utteranceId: String?) {
                         isSpeaking = false
-                        onStateUpdate("IDLE")
+                        onStateUpdate("IDLE", "Standing by.")
                         if (isContinuousMode) {
                             mainHandler.postDelayed({ startListening() }, 500)
                         }
                     }
                 })
+
+                // If speech was requested before TTS loaded, speak it now!
+                pendingSpeech?.let { text ->
+                    val queued = text
+                    pendingSpeech = null
+                    speak(queued)
+                }
+            } else {
+                onStateUpdate("ERROR", "TTS engine initialization failed.")
             }
         }
     }
 
     fun startContinuousCadence() {
         isContinuousMode = true
-        speak("Nex online, listening to your commands, Sir.")
+        speak("Nex online. Systems fully operational, Sir.")
     }
 
     fun stopContinuousCadence() {
         isContinuousMode = false
         stopListening()
         destroyRecognizer()
-        speak("Systems entering standby mode, Sir.")
+        speak("Systems powering down. Standing by, Sir.")
     }
 
     fun startListening() {
@@ -98,26 +106,33 @@ class VoiceManager(
         mainHandler.post {
             try {
                 destroyRecognizer()
+
+                if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+                    onStateUpdate("ERROR", "Speech recognizer unavailable on this device.")
+                    return@post
+                }
+
                 speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
                     setRecognitionListener(object : RecognitionListener {
                         override fun onReadyForSpeech(params: Bundle?) {
-                            onStateUpdate("LISTENING")
+                            onStateUpdate("LISTENING", "Listening to your voice, Sir...")
                         }
 
                         override fun onBeginningOfSpeech() {}
                         override fun onRmsChanged(rmsdB: Float) {}
                         override fun onBufferReceived(buffer: ByteArray?) {}
                         override fun onEndOfSpeech() {
-                            onStateUpdate("PROCESSING")
+                            onStateUpdate("PROCESSING", "Analyzing audio protocols...")
                         }
 
                         override fun onError(error: Int) {
-                            onStateUpdate("IDLE")
-                            // Continuous mode me chupchap dobara mic open kare, bar-bar disturb na kare
+                            // Silent recovery in continuous mode so it never goes dead
                             if (isContinuousMode && !isSpeaking) {
                                 mainHandler.postDelayed({
                                     startListening()
-                                }, 600)
+                                }, 500)
+                            } else {
+                                onStateUpdate("IDLE", "Standing by.")
                             }
                         }
 
@@ -125,11 +140,11 @@ class VoiceManager(
                             val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                             if (!matches.isNullOrEmpty()) {
                                 val query = matches[0]
+                                onStateUpdate("HEARD", query)
                                 onSpeechRecognized(query)
                             } else {
-                                onStateUpdate("IDLE")
                                 if (isContinuousMode) {
-                                    mainHandler.postDelayed({ startListening() }, 500)
+                                    mainHandler.postDelayed({ startListening() }, 400)
                                 }
                             }
                         }
@@ -139,7 +154,6 @@ class VoiceManager(
                     })
                 }
 
-                // Bilingual Indian English + Hinglish + Hindi recognition
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-IN")
@@ -151,7 +165,6 @@ class VoiceManager(
 
                 speechRecognizer?.startListening(intent)
             } catch (e: Exception) {
-                onStateUpdate("IDLE")
                 if (isContinuousMode) {
                     mainHandler.postDelayed({ startListening() }, 1000)
                 }
@@ -160,12 +173,18 @@ class VoiceManager(
     }
 
     fun speak(text: String) {
+        if (!isTtsReady) {
+            // Queue speech until TTS finishes loading
+            pendingSpeech = text
+            return
+        }
+
         mainHandler.post {
             stopListening()
             val params = Bundle().apply {
-                putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "NEX_CADENCE_ID")
+                putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "NEX_SPEECH_ID")
             }
-            textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, params, "NEX_CADENCE_ID")
+            textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, params, "NEX_SPEECH_ID")
         }
     }
 
