@@ -22,7 +22,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
-    <!-- MASTER DEVICE ACCESS: Allows Nex to see, launch and control ALL installed apps -->
+    <!-- Full Device Access & Package Visibility -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
@@ -48,21 +48,10 @@
             </intent-filter>
         </activity>
 
-        <!-- 24/7 Background Always-On Service -->
+        <!-- 24/7 Background Sentinel Service -->
         <service
             android:name=".NexCoreService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
-        <!-- Private WhatsApp & SMS Notification Sentinel -->
-        <service
-            android:name=".NotificationSentinelService"
-            android:exported="true"
-            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
-            <intent-filter>
-                <action android:name="android.service.notification.NotificationListenerService" />
-            </intent-filter>
-        </service>
-
-    </application>
-</manifest>
+        <!-- Master Accessibility Service (God-Mode Phone
