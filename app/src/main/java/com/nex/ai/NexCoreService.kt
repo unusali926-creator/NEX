@@ -12,17 +12,9 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
-import java.util.Locale
 
 class NexCoreService : Service() {
 
-    private lateinit var voiceManager: VoiceManager
-    private val serviceJob = Job()
-    private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
     private var wakeLock: PowerManager.WakeLock? = null
 
     companion object {
@@ -37,22 +29,11 @@ class NexCoreService : Service() {
         super.onCreate()
         createNotificationChannel()
 
-        // Acquire WakeLock so CPU doesn't sleep in background
+        // Acquire WakeLock so CPU doesn't sleep
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "NexAI:BackgroundWakeLock").apply {
             acquire(24 * 60 * 60 * 1000L) // 24 hours keep-alive
         }
-
-        // Initialize background voice cadence with (state, detail) 2-parameter signature
-        voiceManager = VoiceManager(
-            context = this,
-            onSpeechRecognized = { userQuery ->
-                handleVoiceCommand(userQuery)
-            },
-            onStateUpdate = { state, detail ->
-                updateNotification("Status: $detail")
-            }
-        )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -63,7 +44,7 @@ class NexCoreService : Service() {
             }
             else -> {
                 isServiceRunning = true
-                val notification = buildNotification("N.E.X. / F.R.I.D.A.Y. Online & Listening...")
+                val notification = buildNotification("N.E.X. Sentinel Online & Standing By...")
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     startForeground(
@@ -76,34 +57,9 @@ class NexCoreService : Service() {
                 } else {
                     startForeground(NOTIFICATION_ID, notification)
                 }
-
-                voiceManager.startContinuousCadence()
             }
         }
         return START_STICKY
-    }
-
-    private fun handleVoiceCommand(rawQuery: String) {
-        val query = rawQuery.lowercase(Locale.ROOT).trim()
-
-        // Voice sleep trigger
-        if (query.contains("sleep") || query.contains("standby") || query.contains("so jao")) {
-            voiceManager.speak("Entering standby mode, Sir.")
-            shutdownService()
-            return
-        }
-
-        serviceScope.launch {
-            when (val result = HardwareManager.processVoiceCommand(this@NexCoreService, rawQuery)) {
-                is CommandResult.Handled -> {
-                    voiceManager.speak(result.response)
-                }
-                is CommandResult.PassToAI -> {
-                    val aiResponse = AiEngine.queryNex(result.originalQuery)
-                    voiceManager.speak(aiResponse)
-                }
-            }
-        }
     }
 
     private fun buildNotification(statusText: String): Notification {
@@ -134,11 +90,6 @@ class NexCoreService : Service() {
             .build()
     }
 
-    private fun updateNotification(statusText: String) {
-        val manager = getSystemService(NotificationManager::class.java)
-        manager?.notify(NOTIFICATION_ID, buildNotification(statusText))
-    }
-
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -146,7 +97,7 @@ class NexCoreService : Service() {
                 "Nex Core Sentinel",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Background Voice Cadence for Nex Assistant"
+                description = "Background Sentinel for Nex Assistant"
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)
@@ -155,7 +106,6 @@ class NexCoreService : Service() {
 
     private fun shutdownService() {
         isServiceRunning = false
-        voiceManager.shutdown()
         wakeLock?.let {
             if (it.isHeld) it.release()
         }
@@ -166,7 +116,6 @@ class NexCoreService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         shutdownService()
-        serviceJob.cancel()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
