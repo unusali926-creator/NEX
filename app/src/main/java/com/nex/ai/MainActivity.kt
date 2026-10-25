@@ -32,57 +32,115 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
 
+    private lateinit var voiceManager: VoiceManager
     private var isPoweredOn by mutableStateOf(false)
+    private var assistantState by mutableStateOf("STANDBY")
+    private var statusDetail by mutableStateOf("TAP POWER ON TO ACTIVATE")
+    private var lastRecognizedText by mutableStateOf("")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Check if service was already running in background
-        isPoweredOn = NexCoreService.isServiceRunning
+        voiceManager = VoiceManager(
+            context = this,
+            onSpeechRecognized = { query ->
+                lastRecognizedText = query
+                handleVoiceCommand(query)
+            },
+            onStateUpdate = { state, detail ->
+                assistantState = state
+                statusDetail = detail
+            }
+        )
 
         setContent {
             NexArcReactorHUD(
                 isPoweredOn = isPoweredOn,
+                assistantState = assistantState,
+                statusDetail = statusDetail,
+                lastHeard = lastRecognizedText,
+                onReactorTap = {
+                    if (isPoweredOn) {
+                        voiceManager.startListening()
+                    }
+                },
                 onPowerOn = {
-                    startNexSentinelService()
-                    isPoweredOn = true
+                    requestPermissionsAndStart()
                 },
                 onPowerSleep = {
-                    stopNexSentinelService()
                     isPoweredOn = false
+                    assistantState = "STANDBY"
+                    statusDetail = "SYSTEM IN STANDBY"
+                    voiceManager.stopContinuousCadence()
+                    stopNexCoreService()
                 }
             )
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        isPoweredOn = NexCoreService.isServiceRunning
+    private fun requestPermissionsAndStart() {
+        requestBatteryOptimizationBypass()
+        isPoweredOn = true
+        voiceManager.startContinuousCadence()
+        startNexCoreService()
     }
 
-    private fun startNexSentinelService() {
-        requestBatteryOptimizationBypass()
+    private fun handleVoiceCommand(rawQuery: String) {
+        val query = rawQuery.lowercase(Locale.ROOT).trim()
+
+        // Check Sleep command
+        if (query.contains("sleep") || query.contains("standby") || query.contains("so jao")) {
+            isPoweredOn = false
+            assistantState = "STANDBY"
+            statusDetail = "SYSTEM IN STANDBY"
+            voiceManager.stopContinuousCadence()
+            stopNexCoreService()
+            return
+        }
+
+        lifecycleScope.launch {
+            when (val result = HardwareManager.processVoiceCommand(this@MainActivity, rawQuery)) {
+                is CommandResult.Handled -> {
+                    voiceManager.speak(result.response)
+                }
+                is CommandResult.PassToAI -> {
+                    val aiResponse = AiEngine.queryNex(result.originalQuery)
+                    voiceManager.speak(aiResponse)
+                }
+            }
+        }
+    }
+
+    private fun startNexCoreService() {
         val serviceIntent = Intent(this, NexCoreService::class.java).apply {
             action = NexCoreService.ACTION_START
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            ContextCompat.startForegroundService(this, serviceIntent)
-        } else {
-            startService(serviceIntent)
-        }
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                ContextCompat.startForegroundService(this, serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
+        } catch (_: Exception) {}
     }
 
-    private fun stopNexSentinelService() {
+    private fun stopNexCoreService() {
         val serviceIntent = Intent(this, NexCoreService::class.java).apply {
             action = NexCoreService.ACTION_STOP
         }
-        startService(serviceIntent)
+        try {
+            startService(serviceIntent)
+        } catch (_: Exception) {}
     }
 
     @SuppressLint("BatteryLife")
@@ -99,17 +157,25 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        voiceManager.shutdown()
+    }
 }
 
 @Composable
 fun NexArcReactorHUD(
     isPoweredOn: Boolean,
+    assistantState: String,
+    statusDetail: String,
+    lastHeard: String,
+    onReactorTap: () -> Unit,
     onPowerOn: () -> Unit,
     onPowerSleep: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
 
-    // Request permissions automatically
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) {}
@@ -130,10 +196,10 @@ fun NexArcReactorHUD(
     val infiniteTransition = rememberInfiniteTransition(label = "ArcPulse")
 
     val pulseScale by infiniteTransition.animateFloat(
-        initialValue = if (isPoweredOn) 0.92f else 0.98f,
-        targetValue = if (isPoweredOn) 1.10f else 1.02f,
+        initialValue = if (assistantState == "LISTENING" || assistantState == "SPEAKING") 0.90f else 0.98f,
+        targetValue = if (assistantState == "LISTENING" || assistantState == "SPEAKING") 1.12f else 1.02f,
         animationSpec = infiniteRepeatable(
-            animation = tween(if (isPoweredOn) 700 else 1400, easing = FastOutSlowInEasing),
+            animation = tween(if (assistantState == "LISTENING") 650 else 1400, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "PulseScale"
@@ -153,7 +219,14 @@ fun NexArcReactorHUD(
     val glowingGreen = Color(0xFF00E676)
     val sleepAmber = Color(0xFFFF9100)
     val deepDark = Color(0xFF050811)
-    val currentColor = if (isPoweredOn) glowingGreen else sleepAmber
+
+    val currentColor = when {
+        !isPoweredOn -> sleepAmber
+        assistantState == "LISTENING" -> glowingGreen
+        assistantState == "PROCESSING" -> Color(0xFFFFD600)
+        assistantState == "SPEAKING" -> activeCyan
+        else -> Color(0xFF0091EA)
+    }
 
     Box(
         modifier = Modifier
@@ -168,7 +241,7 @@ fun NexArcReactorHUD(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // HUD Header
+            // Header
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.padding(top = 28.dp)
@@ -181,9 +254,9 @@ fun NexArcReactorHUD(
                     fontFamily = FontFamily.Monospace,
                     letterSpacing = 4.sp
                 )
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = if (isPoweredOn) "24/7 SENTINEL ACTIVE (BACKGROUND ON)" else "SYSTEM IN STANDBY",
+                    text = if (isPoweredOn) "STATUS: ACTIVE CADENCE" else "STATUS: STANDBY",
                     color = currentColor,
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
@@ -191,19 +264,17 @@ fun NexArcReactorHUD(
                 )
             }
 
-            // Arc Reactor HUD Core
+            // Arc Reactor
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .size(260.dp)
+                    .size(250.dp)
                     .scale(if (isPoweredOn) pulseScale else 1f)
-                    .clickable {
-                        if (!isPoweredOn) onPowerOn()
-                    }
+                    .clickable(enabled = isPoweredOn) { onReactorTap() }
             ) {
                 Box(
                     modifier = Modifier
-                        .size(250.dp)
+                        .size(240.dp)
                         .rotate(if (isPoweredOn) rotationAngle else 0f)
                         .border(
                             width = 2.dp,
@@ -216,13 +287,13 @@ fun NexArcReactorHUD(
 
                 Box(
                     modifier = Modifier
-                        .size(200.dp)
+                        .size(190.dp)
                         .border(width = 3.dp, color = currentColor.copy(alpha = 0.5f), shape = CircleShape)
                 )
 
                 Box(
                     modifier = Modifier
-                        .size(130.dp)
+                        .size(125.dp)
                         .clip(CircleShape)
                         .background(
                             Brush.radialGradient(
@@ -247,15 +318,33 @@ fun NexArcReactorHUD(
                 }
             }
 
-            // Subtitle
-            Text(
-                text = if (isPoweredOn) "SPEAK FREELY • FULL DEVICE ACCESS" else "TAP POWER ON TO ACTIVATE",
-                color = currentColor,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                fontFamily = FontFamily.Monospace,
-                letterSpacing = 1.5.sp
-            )
+            // Real-time Text Feedback HUD
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+            ) {
+                Text(
+                    text = statusDetail,
+                    color = currentColor,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 1.sp,
+                    textAlign = TextAlign.Center
+                )
+                if (lastHeard.isNotBlank() && isPoweredOn) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "HEARD: \"$lastHeard\"",
+                        color = Color.White.copy(alpha = 0.8f),
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
 
             // Power Buttons
             Row(
