@@ -12,9 +12,17 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import java.util.Locale
 
 class NexCoreService : Service() {
 
+    private lateinit var voiceManager: VoiceManager
+    private val serviceJob = Job()
+    private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
     private var wakeLock: PowerManager.WakeLock? = null
 
     companion object {
@@ -23,17 +31,43 @@ class NexCoreService : Service() {
         const val ACTION_START = "ACTION_START_NEX"
         const val ACTION_STOP = "ACTION_STOP_NEX"
         var isServiceRunning = false
+
+        // Bridge to MainActivity HUD
+        var onStateUpdateListener: ((String, String) -> Unit)? = null
+        var onTextHeardListener: ((String) -> Unit)? = null
+
+        var currentAssistantState = "STANDBY"
+        var currentStatusDetail = "TAP POWER ON TO ACTIVATE"
+        var lastHeardText = ""
     }
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
 
-        // Acquire WakeLock so CPU doesn't sleep
+        // CPU Keep-Alive: Prevents phone from sleeping when screen is OFF
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "NexAI:BackgroundWakeLock").apply {
-            acquire(24 * 60 * 60 * 1000L) // 24 hours keep-alive
+        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "NexAI:CpuKeepAliveWakeLock").apply {
+            setReferenceCounted(false)
+            acquire(24 * 60 * 60 * 1000L) // 24-hour continuous shield
         }
+
+        // Initialize 24/7 Master Voice Cadence inside Service
+        voiceManager = VoiceManager(
+            context = this,
+            onSpeechRecognized = { userQuery ->
+                lastHeardText = userQuery
+                onTextHeardListener?.invoke(userQuery)
+                wakeScreenBriefly() // Wakes screen up when you speak
+                handleVoiceCommand(userQuery)
+            },
+            onStateUpdate = { state, detail ->
+                currentAssistantState = state
+                currentStatusDetail = detail
+                updateNotification(detail)
+                onStateUpdateListener?.invoke(state, detail)
+            }
+        )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -44,7 +78,7 @@ class NexCoreService : Service() {
             }
             else -> {
                 isServiceRunning = true
-                val notification = buildNotification("N.E.X. Sentinel Online & Standing By...")
+                val notification = buildNotification("N.E.X. Online & Listening (Off-Screen Ready)...")
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     startForeground(
@@ -57,9 +91,50 @@ class NexCoreService : Service() {
                 } else {
                     startForeground(NOTIFICATION_ID, notification)
                 }
+
+                voiceManager.startContinuousCadence()
             }
         }
         return START_STICKY
+    }
+
+    private fun handleVoiceCommand(rawQuery: String) {
+        val query = rawQuery.lowercase(Locale.ROOT).trim()
+
+        // Sleep command
+        if (query.contains("sleep") || query.contains("standby") || query.contains("so jao")) {
+            voiceManager.speak("Yes Sir, powering down systems into standby.")
+            shutdownService()
+            return
+        }
+
+        serviceScope.launch {
+            when (val result = HardwareManager.processVoiceCommand(this@NexCoreService, rawQuery)) {
+                is CommandResult.Handled -> {
+                    voiceManager.speak(result.response)
+                }
+                is CommandResult.PassToAI -> {
+                    currentAssistantState = "PROCESSING"
+                    currentStatusDetail = "NEX THINKING..."
+                    onStateUpdateListener?.invoke(currentAssistantState, currentStatusDetail)
+
+                    val aiResponse = AiEngine.queryNex(result.originalQuery)
+                    voiceManager.speak(aiResponse)
+                }
+            }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun wakeScreenBriefly() {
+        try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            val screenLock = powerManager.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                "NexAI:ScreenWakeUp"
+            )
+            screenLock.acquire(4000L) // Lights up screen for 4 seconds
+        } catch (_: Exception) {}
     }
 
     private fun buildNotification(statusText: String): Notification {
@@ -80,7 +155,7 @@ class NexCoreService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("N.E.X. INTELLIGENCE (ACTIVE)")
+            .setContentTitle("N.E.X. / F.R.I.D.A.Y. (ACTIVE)")
             .setContentText(statusText)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setOngoing(true)
@@ -90,6 +165,11 @@ class NexCoreService : Service() {
             .build()
     }
 
+    private fun updateNotification(statusText: String) {
+        val manager = getSystemService(NotificationManager::class.java)
+        manager?.notify(NOTIFICATION_ID, buildNotification(statusText))
+    }
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -97,7 +177,7 @@ class NexCoreService : Service() {
                 "Nex Core Sentinel",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Background Sentinel for Nex Assistant"
+                description = "Background & Off-Screen Sentinel for Nex Assistant"
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)
@@ -106,6 +186,11 @@ class NexCoreService : Service() {
 
     private fun shutdownService() {
         isServiceRunning = false
+        currentAssistantState = "STANDBY"
+        currentStatusDetail = "SYSTEM IN STANDBY"
+        onStateUpdateListener?.invoke(currentAssistantState, currentStatusDetail)
+
+        voiceManager.shutdown()
         wakeLock?.let {
             if (it.isHeld) it.release()
         }
@@ -116,6 +201,7 @@ class NexCoreService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         shutdownService()
+        serviceJob.cancel()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
