@@ -8,15 +8,19 @@ import java.io.BufferedReader
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
+import java.util.Locale
 
 object AiEngine {
 
-    // Groq Console (console.groq.com) se free API Key yahan paste karein:
+    // 1. Groq Console (console.groq.com) Key
     var apiKey: String = "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"
 
-    private const val GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
+    // 2. Tavily Console (tavily.com) Free Live Web Search Key
+    var tavilyApiKey: String = "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"
 
-    // Primary Flagship 70B Model on Groq LPUs
+    private const val GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
+    private const val TAVILY_ENDPOINT = "https://api.tavily.com/search"
+
     private var activeModel: String = "llama-3.3-70b-versatile"
     private val FALLBACK_MODELS = listOf(
         "llama-3.3-70b-versatile",
@@ -24,24 +28,25 @@ object AiEngine {
         "openai/gpt-oss-20b"
     )
 
-    // Lean 6-turn sliding memory buffer (Saves mobile network upload latency)
     private val conversationMemory = mutableListOf<JSONObject>()
     private const val MAX_MEMORY_TURNS = 6
 
     private const val SYSTEM_PROMPT = """
-        You are Nex, a hyper-intelligent, warm, and loyal AI companion inspired by Tony Stark's F.R.I.D.A.Y.
+        You are Nex, a hyper-intelligent, warm, witty, and loyal AI companion inspired by Tony Stark's F.R.I.D.A.Y. and J.A.R.V.I.S.
         
-        AUTONOMOUS TOOL EXECUTION:
-        If Sir asks you to do something on his device in ANY language or slang (Hindi, Hinglish, English):
-        Attach an action tag at the START of your response:
-        - [EXEC:REELS] -> Watch Instagram Reels (e.g. 'reels chalao', 'bore ho raha hu')
+        LIVE INTERNET DATA AWARENESS:
+        You have direct real-time access to the entire internet via live web scraping and search. When live internet search data is provided in the prompt, synthesize the fresh facts accurately and seamlessly.
+        
+        AUTONOMOUS HARDWARE EXECUTION:
+        If Sir asks you to do something on his device, attach an execution tag at the START:
+        - [EXEC:REELS] -> Watch Instagram Reels
         - [EXEC:OPEN:instagram] -> Open Instagram
         - [EXEC:OPEN:youtube] -> Open YouTube
         - [EXEC:OPEN:whatsapp] -> Open WhatsApp
         - [EXEC:OPEN:spotify] -> Open Spotify
         - [EXEC:OPEN:camera] -> Open Camera
         - [EXEC:PLAY:song_name] -> Play song on YouTube
-        - [EXEC:TORCH_ON] -> Turn on flashlight / light
+        - [EXEC:TORCH_ON] -> Turn on flashlight
         - [EXEC:TORCH_OFF] -> Turn off flashlight
         - [EXEC:VOLUME_UP] -> Raise volume
         - [EXEC:VOLUME_DOWN] -> Lower volume
@@ -51,26 +56,36 @@ object AiEngine {
         - [EXEC:SCROLL_DOWN] -> Next reel / scroll down
         - [EXEC:BACK] -> Go back
         
-        If Sir is simply conversing, do NOT attach any action tag.
-        
-        Speed Directives:
-        1. Always address him as 'Sir', and preferably start with 'Yes Sir,'.
-        2. Keep your answers ultra-crisp, sharp, and concise (strictly 1 to 2 sentences max). Fast answers are mandatory.
+        Personality:
+        1. Always address him respectfully as 'Sir', and preferably start with 'Yes Sir,'.
+        2. Keep answers concise, articulate, and spoken-friendly (strictly 1 to 2 sentences max).
         3. Never use markdown symbols (*, #), bullet points, or emojis.
     """
 
     suspend fun queryNex(prompt: String): String = withContext(Dispatchers.IO) {
-        val cleanKey = apiKey.trim()
-        if (cleanKey.isBlank() || cleanKey == "YOUR_GROQ_API_KEY_HERE") {
+        val cleanGroqKey = apiKey.trim()
+        if (cleanGroqKey.isBlank() || cleanGroqKey == "YOUR_GROQ_API_KEY_HERE") {
             return@withContext "Yes Sir, your Groq API key is missing. Please add your key in AiEngine."
         }
 
-        var reply = executeRequest(cleanKey, activeModel, prompt)
+        // 1. Detect if query requires Real-Time Live Internet Data
+        var enrichedPrompt = prompt.trim()
+        val cleanTavilyKey = tavilyApiKey.trim()
+
+        if (isLiveWebQuery(prompt) && cleanTavilyKey.isNotBlank() && cleanTavilyKey != "YOUR_TAVILY_API_KEY_HERE") {
+            val liveWebSnippet = fetchLiveWebData(prompt, cleanTavilyKey)
+            if (!liveWebSnippet.isNullOrBlank()) {
+                enrichedPrompt = "Context from live internet search: $liveWebSnippet\n\nSir's Question: $prompt"
+            }
+        }
+
+        // 2. Synthesize with LLaMA 3.3 70B via HTTP Keep-Alive
+        var reply = executeRequest(cleanGroqKey, activeModel, enrichedPrompt)
 
         if (reply == null) {
             for (model in FALLBACK_MODELS) {
                 if (model != activeModel) {
-                    reply = executeRequest(cleanKey, model, prompt)
+                    reply = executeRequest(cleanGroqKey, model, enrichedPrompt)
                     if (reply != null) {
                         activeModel = model
                         break
@@ -88,6 +103,72 @@ object AiEngine {
         return@withContext "Yes Sir, I am having trouble connecting to the mainframe. Please check your internet connection."
     }
 
+    // Identifies whether query needs live internet search
+    private fun isLiveWebQuery(query: String): Boolean {
+        val q = query.lowercase(Locale.ROOT)
+        val triggers = listOf(
+            "today", "aaj", "current", "latest", "news", "khabar", "taaza",
+            "weather", "mausam", "temperature", "score", "match", "who won",
+            "price", "rate", "stock", "bhav", "aaj ka", "live", "update",
+            "election", "release date", "kya chal raha", "what happened"
+        )
+        return triggers.any { q.contains(it) }
+    }
+
+    // Real-Time Live Internet Search via Tavily Engine
+    private fun fetchLiveWebData(query: String, tavilyKey: String): String? {
+        var connection: HttpURLConnection? = null
+        return try {
+            val url = URL(TAVILY_ENDPOINT)
+            connection = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                setRequestProperty("Accept", "application/json")
+                connectTimeout = 3000
+                readTimeout = 3500
+                doOutput = true
+                doInput = true
+            }
+
+            val requestJson = JSONObject().apply {
+                put("api_key", tavilyKey)
+                put("query", query.trim())
+                put("search_depth", "basic")
+                put("max_results", 2)
+                put("include_answer", true)
+            }
+
+            val inputBytes = requestJson.toString().toByteArray(StandardCharsets.UTF_8)
+            connection.outputStream.use { os ->
+                os.write(inputBytes, 0, inputBytes.size)
+                os.flush()
+            }
+
+            if (connection.responseCode == HttpURLConnection.HTTP_OK) {
+                val responseText = connection.inputStream.bufferedReader().use(BufferedReader::readText)
+                val json = JSONObject(responseText)
+
+                val answer = json.optString("answer", "")
+                if (answer.isNotBlank()) return answer
+
+                val results = json.optJSONArray("results")
+                if (results != null && results.length() > 0) {
+                    val sb = StringBuilder()
+                    for (i in 0 until results.length()) {
+                        val item = results.getJSONObject(i)
+                        sb.append(item.optString("content", "")).append(" ")
+                    }
+                    return sb.toString().trim()
+                }
+            }
+            null
+        } catch (_: Exception) {
+            null
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
     private fun executeRequest(key: String, model: String, prompt: String): String? {
         var connection: HttpURLConnection? = null
         try {
@@ -97,7 +178,7 @@ object AiEngine {
                 setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 setRequestProperty("Accept", "application/json")
                 setRequestProperty("Authorization", "Bearer $key")
-                setRequestProperty("Connection", "keep-alive") // KEEPS CONNECTION ALIVE: Drops 400ms TLS handshake lag!
+                setRequestProperty("Connection", "keep-alive")
                 connectTimeout = 3000
                 readTimeout = 3500
                 doOutput = true
@@ -106,8 +187,8 @@ object AiEngine {
 
             val requestJson = JSONObject().apply {
                 put("model", model)
-                put("temperature", 0.5) // Lower temperature for faster, sharper tokens
-                put("max_tokens", 70)   // Fast token cap (Instant 200ms generation)
+                put("temperature", 0.5)
+                put("max_tokens", 85)
 
                 val messagesArray = JSONArray().apply {
                     put(JSONObject().apply {
@@ -146,7 +227,6 @@ object AiEngine {
         } catch (_: Exception) {
             return null
         }
-        // Notice: Do NOT forcefully disconnect! Allows Java connection pool to reuse the socket for instant next query!
         return null
     }
 
