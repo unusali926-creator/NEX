@@ -98,7 +98,6 @@ class MainActivity : ComponentActivity() {
     private fun handleVoiceCommand(rawQuery: String) {
         val query = rawQuery.lowercase(Locale.ROOT).trim()
 
-        // Check Sleep command
         if (query.contains("sleep") || query.contains("standby") || query.contains("so jao")) {
             isPoweredOn = false
             assistantState = "STANDBY"
@@ -114,7 +113,11 @@ class MainActivity : ComponentActivity() {
                     voiceManager.speak(result.response)
                 }
                 is CommandResult.PassToAI -> {
+                    // Update HUD to show Nex is actively thinking with ChatGPT/Gemini intelligence
+                    assistantState = "PROCESSING"
+                    statusDetail = "NEX THINKING..."
                     val aiResponse = AiEngine.queryNex(result.originalQuery)
+                    statusDetail = "NEX RESPONDING..."
                     voiceManager.speak(aiResponse)
                 }
             }
@@ -256,7 +259,7 @@ fun NexArcReactorHUD(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = if (isPoweredOn) "STATUS: ACTIVE CADENCE" else "STATUS: STANDBY",
+                    text = if (isPoweredOn) "STATUS: CHATGPT-CLASS ONLINE" else "STATUS: STANDBY",
                     color = currentColor,
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
