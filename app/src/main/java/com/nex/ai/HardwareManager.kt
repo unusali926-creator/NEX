@@ -12,7 +12,6 @@ import android.media.AudioManager
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
-import android.provider.MediaStore
 import android.provider.Settings
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -44,7 +43,7 @@ object HardwareManager {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
 
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) { // Android 14
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 val options = ActivityOptions.makeBasic()
                 options.setPendingIntentBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
                 val pi = PendingIntent.getActivity(
@@ -78,27 +77,26 @@ object HardwareManager {
             .replace(Regex("[\\p{Punct}]"), " ")
             .trim()
 
-        // 1. FAST PATH: Check Offline Accessibility & Hardware Commands
+        // 1. FAST OFFLINE PATH
         val fastResponse = checkFastOfflineCommands(context, cleanFullQuery)
         if (fastResponse != null) {
             return CommandResult.Handled(fastResponse)
         }
 
-        // 2. AI AGENT PATH: Lets 70B LLaMA parse complex natural language & tags
+        // 2. AI AGENT PATH (Natural Language Understanding)
         val aiRawResponse = AiEngine.queryNex(rawQuery)
         val cleanSpeech = parseAndExecuteAiAction(context, aiRawResponse)
         return CommandResult.Handled(cleanSpeech)
     }
 
     private fun checkFastOfflineCommands(context: Context, query: String): String? {
-        // Calling Nex alone
         val wakeKeywords = listOf("nex", "next", "necks", "nyx", "hey nex", "hello nex", "hi nex", "ok nex", "nex suno", "नेक्स", "नेक्स्ट")
         if (wakeKeywords.any { query == it }) {
             return "Yes Sir, standing by. What are your orders?"
         }
 
-        // 1. SCREENSHOT
-        if (query.contains("screenshot") || query.contains("screen shot") || query.contains("स्क्रीनशॉट")) {
+        // Screenshot
+        if (query.contains("screenshot") || query.contains("स्क्रीनशॉट")) {
             return if (NexAccessibilityService.captureScreenshot()) {
                 "Yes Sir, screenshot captured."
             } else {
@@ -107,8 +105,8 @@ object HardwareManager {
             }
         }
 
-        // 2. LOCK PHONE
-        if (query.contains("lock phone") || query.contains("lock screen") || query.contains("phone lock") || query.contains("स्क्रीन लॉक") || query.contains("फोन लॉक")) {
+        // Lock Phone
+        if (query.contains("lock phone") || query.contains("lock screen") || query.contains("phone lock") || query.contains("स्क्रीन लॉक")) {
             return if (NexAccessibilityService.lockPhone()) {
                 "Yes Sir, locking phone."
             } else {
@@ -117,19 +115,19 @@ object HardwareManager {
             }
         }
 
-        // 3. AUTO-SCROLL DOWN (Next Reel / Short)
-        if (query.contains("next reel") || query.contains("agli reel") || query.contains("scroll down") || query.contains("neeche scroll") || query.contains("अगली रील") || query == "scroll") {
+        // Auto-Scroll Down (Next Reel)
+        if (query.contains("next reel") || query.contains("agli reel") || query.contains("scroll down") || query.contains("अगली रील") || query == "scroll") {
             NexAccessibilityService.scrollDown()
             return "Yes Sir, scrolling to next reel."
         }
 
-        // 4. AUTO-SCROLL UP (Previous Reel)
-        if (query.contains("previous reel") || query.contains("pichli reel") || query.contains("scroll up") || query.contains("upar scroll") || query.contains("पिछली रील")) {
+        // Auto-Scroll Up (Previous Reel)
+        if (query.contains("previous reel") || query.contains("pichli reel") || query.contains("scroll up") || query.contains("पिछली रील")) {
             NexAccessibilityService.scrollUp()
             return "Yes Sir, scrolling up."
         }
 
-        // 5. SYSTEM NAVIGATION (Back, Home, Recents, Notifications)
+        // Navigation
         if (query == "back" || query.contains("go back") || query.contains("peeche jao") || query.contains("पीछे जाओ")) {
             NexAccessibilityService.goBack()
             return "Yes Sir, going back."
@@ -151,7 +149,7 @@ object HardwareManager {
             return "Yes Sir, opening quick settings."
         }
 
-        // 6. TORCH
+        // Torch
         if (query == "torch on" || query == "torch jalao" || query == "torch chalu karo" || query.contains("torch on")) {
             return toggleTorch(context, true)
         }
@@ -159,13 +157,13 @@ object HardwareManager {
             return toggleTorch(context, false)
         }
 
-        // 7. INSTAGRAM REELS
+        // Instagram Reels
         if (query == "show me reels" || query == "open reels" || query == "reels dikhao" || query == "reels") {
             launchReels(context)
             return "Yes Sir, launching Instagram Reels right away."
         }
 
-        // 8. VOLUME
+        // Volume
         if (query.contains("volume up") || query.contains("awaz badhao")) {
             return adjustVolume(context, AudioManager.ADJUST_RAISE)
         }
@@ -176,13 +174,13 @@ object HardwareManager {
             return setVolumeMute(context)
         }
 
-        // 9. BATTERY
+        // Battery
         if (query == "battery" || query.contains("battery kitni hai")) {
             val level = getBatteryPercentage(context)
             return "Yes Sir, battery is at $level percent."
         }
 
-        // 10. TIME
+        // Time
         if (query == "time" || query.contains("time kya hua hai") || query.contains("kitne baje")) {
             val time = SimpleDateFormat("hh:mm a", Locale.UK).format(Date())
             return "Yes Sir, it is currently $time."
@@ -264,4 +262,98 @@ object HardwareManager {
     }
 
     fun playOnYouTube(context: Context, query: String) {
-        val uri = Uri.parse("https://www
+        val uri = Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(query))
+        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+            setPackage("com.google.android.youtube")
+        }
+        launchIntentSafely(context, intent)
+    }
+
+    fun launchApplication(context: Context, appName: String): Boolean {
+        val pm = context.packageManager
+        val cleanName = appName.lowercase().trim()
+
+        val knownPackage = POPULAR_APPS[cleanName]
+        if (knownPackage != null) {
+            val intent = pm.getLaunchIntentForPackage(knownPackage)
+            if (intent != null) {
+                launchIntentSafely(context, intent)
+                return true
+            }
+        }
+
+        try {
+            val packages = pm.getInstalledApplications(0)
+            for (app in packages) {
+                val label = pm.getApplicationLabel(app).toString().lowercase(Locale.ROOT)
+                if (label == cleanName || label.contains(cleanName) || cleanName.contains(label)) {
+                    val launchIntent = pm.getLaunchIntentForPackage(app.packageName)
+                    if (launchIntent != null) {
+                        launchIntentSafely(context, launchIntent)
+                        return true
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        return false
+    }
+
+    fun toggleTorch(context: Context, turnOn: Boolean): String {
+        return try {
+            val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            var targetCameraId: String? = null
+
+            for (id in cameraManager.cameraIdList) {
+                val characteristics = cameraManager.getCameraCharacteristics(id)
+                val hasFlash = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+                val facing = characteristics.get(CameraCharacteristics.LENS_FACING)
+                if (hasFlash && facing == CameraCharacteristics.LENS_FACING_BACK) {
+                    targetCameraId = id
+                    break
+                }
+            }
+
+            if (targetCameraId == null) {
+                targetCameraId = cameraManager.cameraIdList.firstOrNull { id ->
+                    cameraManager.getCameraCharacteristics(id).get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+                }
+            }
+
+            if (targetCameraId != null) {
+                cameraManager.setTorchMode(targetCameraId, turnOn)
+                if (turnOn) "Yes Sir, flashlight initialized." else "Yes Sir, flashlight disengaged."
+            } else {
+                "Yes Sir, no camera flash hardware detected."
+            }
+        } catch (e: Exception) {
+            "Yes Sir, camera flash module is unreachable."
+        }
+    }
+
+    fun adjustVolume(context: Context, direction: Int): String {
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, AudioManager.FLAG_SHOW_UI)
+        return "Yes Sir, audio levels adjusted."
+    }
+
+    fun setVolumeMute(context: Context): String {
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, AudioManager.FLAG_SHOW_UI)
+        return "Yes Sir, audio output muted."
+    }
+
+    fun setMaxVolume(context: Context): String {
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, max, AudioManager.FLAG_SHOW_UI)
+        return "Yes Sir, audio output set to maximum capacity."
+    }
+
+    fun getBatteryPercentage(context: Context): Int {
+        val batteryIntent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val level = batteryIntent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = batteryIntent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        return if (level >= 0 && scale > 0) (level * 100) / scale else 0
+    }
+}
