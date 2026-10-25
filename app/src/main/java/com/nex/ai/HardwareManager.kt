@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
+import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
 import android.net.Uri
@@ -23,8 +24,10 @@ object HardwareManager {
 
     private val POPULAR_APPS = mapOf(
         "instagram" to "com.instagram.android",
+        "insta" to "com.instagram.android",
         "whatsapp" to "com.whatsapp",
         "youtube" to "com.google.android.youtube",
+        "yt" to "com.google.android.youtube",
         "chrome" to "com.android.chrome",
         "browser" to "com.android.chrome",
         "spotify" to "com.spotify.music",
@@ -35,12 +38,11 @@ object HardwareManager {
     )
 
     fun processVoiceCommand(context: Context, rawQuery: String): CommandResult {
-        // Strip punctuation and normalize string (e.g. "nex." -> "nex")
         val cleanFullQuery = rawQuery.lowercase(Locale.ROOT)
             .replace(Regex("[^a-zA-Z0-9 ]"), "")
             .trim()
 
-        // 1. WAKE-WORD ALONE CHECK ("Nex", "Next", "Hey Nex", "Nex suno")
+        // 1. WAKE-WORD / CALLING NEX ALONE
         val wakeKeywords = listOf("nex", "next", "necks", "nyx", "hey nex", "hello nex", "hi nex", "ok nex", "nex suno", "suno nex")
         if (wakeKeywords.any { cleanFullQuery == it }) {
             return CommandResult.Handled("Yes Sir, standing by. What are your orders?")
@@ -51,7 +53,7 @@ object HardwareManager {
             return CommandResult.Handled("Yes Sir, I am Nex, your personal artificial intelligence.")
         }
 
-        // Strip "Nex" prefix if user said "Nex, open Instagram" -> "open instagram"
+        // Strip "Nex" prefix from commands like "Nex torch on karo"
         var query = cleanFullQuery
         val callPrefixes = listOf("hey nex ", "hello nex ", "hi nex ", "ok nex ", "nex ", "next ")
         for (prefix in callPrefixes) {
@@ -61,8 +63,19 @@ object HardwareManager {
             }
         }
 
-        // 2. DEEP IN-APP CONTROL: INSTAGRAM REELS
-        if (query.contains("reel") || query.contains("reels") || query.contains("show me reels") || query.contains("open reels")) {
+        // 2. FLASHLIGHT / TORCH (Bilingual: Hindi & English)
+        if (query.contains("torch") || query.contains("flashlight") || query.contains("flash") || query.contains("light")) {
+            val isOff = query.contains("off") || query.contains("band") || query.contains("bujhao") || query.contains("close") || query.contains("stop")
+            val isOn = query.contains("on") || query.contains("chalu") || query.contains("jalao") || query.contains("start") || query.contains("open")
+            if (isOff) {
+                return CommandResult.Handled(toggleTorch(context, false))
+            } else if (isOn) {
+                return CommandResult.Handled(toggleTorch(context, true))
+            }
+        }
+
+        // 3. INSTAGRAM REELS (Deep In-App Link)
+        if (query.contains("reel") || query.contains("reels")) {
             val uri = Uri.parse("https://www.instagram.com/reels/")
             val intent = Intent(Intent.ACTION_VIEW, uri).apply {
                 setPackage("com.instagram.android")
@@ -72,17 +85,14 @@ object HardwareManager {
                 context.startActivity(intent)
                 CommandResult.Handled("Yes Sir, launching Instagram Reels right away.")
             } catch (e: Exception) {
-                // Browser fallback
-                val fallbackIntent = Intent(Intent.ACTION_VIEW, uri).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                }
+                val fallbackIntent = Intent(Intent.ACTION_VIEW, uri).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
                 context.startActivity(fallbackIntent)
                 CommandResult.Handled("Yes Sir, opening Instagram Reels.")
             }
         }
 
-        // 3. DEEP IN-APP CONTROL: INSTAGRAM DMS / MESSAGES
-        if (query.contains("instagram dm") || query.contains("instagram message") || query.contains("insta message")) {
+        // 4. INSTAGRAM DMS / MESSAGES
+        if (query.contains("insta message") || query.contains("instagram dm") || query.contains("instagram message")) {
             val uri = Uri.parse("https://www.instagram.com/direct/inbox/")
             val intent = Intent(Intent.ACTION_VIEW, uri).apply {
                 setPackage("com.instagram.android")
@@ -90,14 +100,14 @@ object HardwareManager {
             }
             return try {
                 context.startActivity(intent)
-                CommandResult.Handled("Yes Sir, opening Instagram Direct Messages.")
+                CommandResult.Handled("Yes Sir, opening your Instagram messages.")
             } catch (e: Exception) {
                 CommandResult.Handled("Yes Sir, unable to open Instagram inbox.")
             }
         }
 
-        // 4. DEEP IN-APP CONTROL: YOUTUBE SHORTS
-        if (query.contains("short") || query.contains("shorts") || query.contains("youtube shorts")) {
+        // 5. YOUTUBE SHORTS
+        if (query.contains("short") || query.contains("shorts")) {
             val uri = Uri.parse("https://www.youtube.com/shorts")
             val intent = Intent(Intent.ACTION_VIEW, uri).apply {
                 setPackage("com.google.android.youtube")
@@ -107,15 +117,17 @@ object HardwareManager {
                 context.startActivity(intent)
                 CommandResult.Handled("Yes Sir, launching YouTube Shorts.")
             } catch (e: Exception) {
-                CommandResult.Handled("Yes Sir, YouTube application is not reachable.")
+                CommandResult.Handled("Yes Sir, YouTube is not accessible.")
             }
         }
 
-        // 5. DEEP IN-APP CONTROL: PLAY MUSIC / VIDEO ON YOUTUBE
-        if (query.startsWith("play ") || query.contains("on youtube") || query.contains("search youtube")) {
+        // 6. PLAY MUSIC / SEARCH ON YOUTUBE
+        if (query.contains("play ") || query.contains("on youtube") || query.contains("search youtube") || query.contains("gana bajao") || query.contains("gana chalao")) {
             val topic = query.replace("play", "")
                 .replace("on youtube", "")
                 .replace("search youtube", "")
+                .replace("gana bajao", "")
+                .replace("gana chalao", "")
                 .replace("song", "")
                 .trim()
             val uri = Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(topic))
@@ -131,65 +143,48 @@ object HardwareManager {
             }
         }
 
-        // 6. GOOGLE WEB SEARCH
-        if (query.startsWith("google ") || query.startsWith("search web ")) {
-            val searchTerm = query.removePrefix("google ").removePrefix("search web ").trim()
-            val uri = Uri.parse("https://www.google.com/search?q=" + Uri.encode(searchTerm))
-            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        // 7. VOLUME CONTROLS (Bilingual)
+        if (query.contains("volume") || query.contains("awaz") || query.contains("sound")) {
+            if (query.contains("up") || query.contains("increase") || query.contains("badhao") || query.contains("tez") || query.contains("louder")) {
+                return CommandResult.Handled(adjustVolume(context, AudioManager.ADJUST_RAISE))
             }
-            context.startActivity(intent)
-            return CommandResult.Handled("Yes Sir, searching Google for $searchTerm.")
+            if (query.contains("down") || query.contains("decrease") || query.contains("kam") || query.contains("ghatao") || query.contains("lower")) {
+                return CommandResult.Handled(adjustVolume(context, AudioManager.ADJUST_LOWER))
+            }
+            if (query.contains("mute") || query.contains("silent") || query.contains("chup") || query.contains("shant")) {
+                return CommandResult.Handled(setVolumeMute(context))
+            }
+            if (query.contains("max") || query.contains("full") || query.contains("pura") || query.contains("maximum")) {
+                return CommandResult.Handled(setMaxVolume(context))
+            }
         }
 
-        // 7. FLASHLIGHT / TORCH
-        if (query.contains("torch on") || query.contains("flashlight on") || query.contains("turn on torch") || query.contains("turn on light")) {
-            return CommandResult.Handled(toggleTorch(context, true))
-        }
-        if (query.contains("torch off") || query.contains("flashlight off") || query.contains("turn off torch") || query.contains("turn off light")) {
-            return CommandResult.Handled(toggleTorch(context, false))
-        }
-
-        // 8. VOLUME CONTROLS
-        if (query.contains("volume up") || query.contains("increase volume") || query.contains("louder")) {
-            return CommandResult.Handled(adjustVolume(context, AudioManager.ADJUST_RAISE))
-        }
-        if (query.contains("volume down") || query.contains("decrease volume") || query.contains("lower volume")) {
-            return CommandResult.Handled(adjustVolume(context, AudioManager.ADJUST_LOWER))
-        }
-        if (query.contains("mute") || query.contains("silence")) {
-            return CommandResult.Handled(setVolumeMute(context))
-        }
-        if (query.contains("max volume") || query.contains("maximum volume")) {
-            return CommandResult.Handled(setMaxVolume(context))
-        }
-
-        // 9. BATTERY STATUS
-        if (query.contains("battery") || query.contains("charge level") || query.contains("power level")) {
+        // 8. BATTERY STATUS (Bilingual)
+        if (query.contains("battery") || query.contains("charge") || query.contains("charging")) {
             val batteryLevel = getBatteryPercentage(context)
             return CommandResult.Handled("Yes Sir, current power level is at $batteryLevel percent.")
         }
 
-        // 10. EXACT TIME
-        if (query.contains("time") || query.contains("what time is it") || query.contains("clock")) {
+        // 9. TIME CHECK (Bilingual)
+        if (query.contains("time") || query.contains("kitne baje") || query.contains("samay") || query.contains("clock")) {
             val currentTime = SimpleDateFormat("hh:mm a", Locale.UK).format(Date())
             return CommandResult.Handled("Yes Sir, it is currently $currentTime.")
         }
 
-        // 11. SYSTEM SETTINGS
-        if (query.contains("open wifi") || query.contains("wifi settings")) {
+        // 10. SYSTEM SETTINGS
+        if (query.contains("open wifi") || query.contains("wifi settings") || query.contains("wifi kholo")) {
             launchSystemIntent(context, Settings.ACTION_WIFI_SETTINGS)
             return CommandResult.Handled("Yes Sir, opening Wi-Fi settings.")
         }
-        if (query.contains("open bluetooth") || query.contains("bluetooth settings")) {
+        if (query.contains("open bluetooth") || query.contains("bluetooth settings") || query.contains("bluetooth kholo")) {
             launchSystemIntent(context, Settings.ACTION_BLUETOOTH_SETTINGS)
             return CommandResult.Handled("Yes Sir, opening Bluetooth settings.")
         }
-        if (query.contains("open settings") || query.contains("system settings")) {
+        if (query.contains("open settings") || query.contains("system settings") || query.contains("settings kholo")) {
             launchSystemIntent(context, Settings.ACTION_SETTINGS)
             return CommandResult.Handled("Yes Sir, opening master settings.")
         }
-        if (query.contains("go home") || query.contains("home screen")) {
+        if (query.contains("go home") || query.contains("home screen") || query.contains("bahar aao")) {
             val homeIntent = Intent(Intent.ACTION_MAIN).apply {
                 addCategory(Intent.CATEGORY_HOME)
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
@@ -198,8 +193,8 @@ object HardwareManager {
             return CommandResult.Handled("Yes Sir, navigating to home screen.")
         }
 
-        // 12. CAMERA OPTICS
-        if (query.contains("open camera") || query.contains("take photo")) {
+        // 11. CAMERA OPTICS
+        if (query.contains("camera") || query.contains("photo") || query.contains("selfie") || query.contains("picture")) {
             val cameraIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
@@ -211,8 +206,8 @@ object HardwareManager {
             }
         }
 
-        // 13. PHONE DIALER
-        if (query.contains("open dialer") || query.contains("open phone") || query.contains("call")) {
+        // 12. PHONE DIALER
+        if (query.contains("open dialer") || query.contains("phone kholo") || query.contains("call lagao") || query.contains("call")) {
             val dialIntent = Intent(Intent.ACTION_DIAL).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
@@ -220,30 +215,49 @@ object HardwareManager {
             return CommandResult.Handled("Yes Sir, phone dialer engaged.")
         }
 
-        // 14. PRIVATE SENTINEL (WhatsApp/SMS)
-        if (query.contains("message") || query.contains("who texted") || query.contains("read message")) {
+        // 13. PRIVATE SENTINEL (WhatsApp / SMS)
+        if (query.contains("message") || query.contains("who texted") || query.contains("kiska message") || query.contains("message padho")) {
             val brief = NotificationSentinelService.getLatestNotificationBrief()
             return CommandResult.Handled("Yes Sir, $brief")
         }
 
-        // 15. UNIVERSAL APP LAUNCHER (Any installed app)
+        // 14. UNIVERSAL APP LAUNCHER (Bilingual: "open...", "launch...", "...kholo", "...chalao")
+        var targetApp: String? = null
         if (query.startsWith("open ") || query.startsWith("launch ")) {
-            val targetName = query.removePrefix("open ").removePrefix("launch ").trim()
-            val launched = launchApplication(context, targetName)
-            return if (launched) {
-                CommandResult.Handled("Yes Sir, opening $targetName right away.")
-            } else {
-                CommandResult.Handled("Yes Sir, $targetName is not installed on this device.")
+            targetApp = query.removePrefix("open ").removePrefix("launch ").trim()
+        } else if (query.endsWith(" kholo") || query.endsWith(" chalao")) {
+            targetApp = query.removeSuffix(" kholo").removeSuffix(" chalao").trim()
+        } else if (query.contains(" kholo") || query.contains(" open")) {
+            targetApp = query.replace("kholo", "").replace("open", "").replace("app", "").trim()
+        }
+
+        if (!targetApp.isNullOrBlank()) {
+            val launched = launchApplication(context, targetApp)
+            if (launched) {
+                return CommandResult.Handled("Yes Sir, opening $targetApp right away.")
             }
         }
 
-        // Pass to AI with conversation memory
+        // Direct check for popular apps like "instagram", "whatsapp", "youtube", "spotify"
+        for ((key, _) in POPULAR_APPS) {
+            if (query == key || query.contains(key)) {
+                val launched = launchApplication(context, key)
+                if (launched) {
+                    return CommandResult.Handled("Yes Sir, opening $key now.")
+                }
+            }
+        }
+
+        // If not a hardware action, pass to ChatGPT-class AI Engine
         return CommandResult.PassToAI(rawQuery)
     }
 
     private fun launchApplication(context: Context, appName: String): Boolean {
         val pm = context.packageManager
-        val knownPackage = POPULAR_APPS[appName]
+        val cleanName = appName.lowercase().trim()
+
+        // 1. Direct Package Map Check
+        val knownPackage = POPULAR_APPS[cleanName]
         if (knownPackage != null) {
             val intent = pm.getLaunchIntentForPackage(knownPackage)
             if (intent != null) {
@@ -253,11 +267,12 @@ object HardwareManager {
             }
         }
 
+        // 2. Scan installed applications
         try {
             val packages = pm.getInstalledApplications(0)
             for (app in packages) {
                 val label = pm.getApplicationLabel(app).toString().lowercase(Locale.ROOT)
-                if (label == appName || label.contains(appName)) {
+                if (label == cleanName || label.contains(cleanName) || cleanName.contains(label)) {
                     val launchIntent = pm.getLaunchIntentForPackage(app.packageName)
                     if (launchIntent != null) {
                         launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
@@ -274,11 +289,33 @@ object HardwareManager {
     private fun toggleTorch(context: Context, turnOn: Boolean): String {
         return try {
             val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-            val cameraId = cameraManager.cameraIdList[0]
-            cameraManager.setTorchMode(cameraId, turnOn)
-            if (turnOn) "Yes Sir, flashlight initialized." else "Yes Sir, flashlight disengaged."
+            var targetCameraId: String? = null
+
+            // Detect back-facing camera with flash hardware
+            for (id in cameraManager.cameraIdList) {
+                val characteristics = cameraManager.getCameraCharacteristics(id)
+                val hasFlash = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+                val facing = characteristics.get(CameraCharacteristics.LENS_FACING)
+                if (hasFlash && facing == CameraCharacteristics.LENS_FACING_BACK) {
+                    targetCameraId = id
+                    break
+                }
+            }
+
+            if (targetCameraId == null) {
+                targetCameraId = cameraManager.cameraIdList.firstOrNull { id ->
+                    cameraManager.getCameraCharacteristics(id).get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+                }
+            }
+
+            if (targetCameraId != null) {
+                cameraManager.setTorchMode(targetCameraId, turnOn)
+                if (turnOn) "Yes Sir, flashlight initialized." else "Yes Sir, flashlight disengaged."
+            } else {
+                "Yes Sir, no camera flash hardware detected."
+            }
         } catch (e: Exception) {
-            "Yes Sir, flashlight module is unreachable."
+            "Yes Sir, camera flash module is unreachable."
         }
     }
 
