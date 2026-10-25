@@ -43,14 +43,14 @@ class NexCoreService : Service() {
             acquire(24 * 60 * 60 * 1000L) // 24 hours keep-alive
         }
 
-        // Initialize background voice cadence
+        // Initialize background voice cadence with (state, detail) 2-parameter signature
         voiceManager = VoiceManager(
             context = this,
             onSpeechRecognized = { userQuery ->
                 handleVoiceCommand(userQuery)
             },
-            onStateUpdate = { state ->
-                updateNotification("Status: $state")
+            onStateUpdate = { state, detail ->
+                updateNotification("Status: $detail")
             }
         )
     }
@@ -80,7 +80,7 @@ class NexCoreService : Service() {
                 voiceManager.startContinuousCadence()
             }
         }
-        return START_STICKY // Android will resurrect Nex if ever killed by RAM pressure
+        return START_STICKY
     }
 
     private fun handleVoiceCommand(rawQuery: String) {
