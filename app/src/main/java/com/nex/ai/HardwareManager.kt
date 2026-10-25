@@ -21,6 +21,20 @@ sealed class CommandResult {
 
 object HardwareManager {
 
+    // Direct Package Mapping for Instant 100% Launch Reliability
+    private val POPULAR_APPS = mapOf(
+        "instagram" to "com.instagram.android",
+        "whatsapp" to "com.whatsapp",
+        "youtube" to "com.google.android.youtube",
+        "chrome" to "com.android.chrome",
+        "browser" to "com.android.chrome",
+        "spotify" to "com.spotify.music",
+        "facebook" to "com.facebook.katana",
+        "snapchat" to "com.snapchat.android",
+        "telegram" to "org.telegram.messenger",
+        "calculator" to "com.google.android.calculator"
+    )
+
     fun processVoiceCommand(context: Context, rawQuery: String): CommandResult {
         val query = rawQuery.lowercase(Locale.ROOT).trim()
 
@@ -32,7 +46,7 @@ object HardwareManager {
             return CommandResult.Handled(toggleTorch(context, false))
         }
 
-        // 2. Volume Controls (Full Audio Access)
+        // 2. Volume Controls
         if (query.contains("volume up") || query.contains("increase volume") || query.contains("louder")) {
             return CommandResult.Handled(adjustVolume(context, AudioManager.ADJUST_RAISE))
         }
@@ -46,7 +60,7 @@ object HardwareManager {
             return CommandResult.Handled(setMaxVolume(context))
         }
 
-        // 3. Battery Percentage Check
+        // 3. Battery Status
         if (query.contains("battery") || query.contains("charge level") || query.contains("power level")) {
             val batteryLevel = getBatteryPercentage(context)
             return CommandResult.Handled("Sir, current power level is at $batteryLevel percent.")
@@ -61,35 +75,26 @@ object HardwareManager {
         // 5. System Quick Settings / Navigation
         if (query.contains("open wifi") || query.contains("wifi settings")) {
             launchSystemIntent(context, Settings.ACTION_WIFI_SETTINGS)
-            return CommandResult.Handled("Opening Wi-Fi configuration, Sir.")
+            return CommandResult.Handled("Accessing Wi-Fi protocols, Sir.")
         }
         if (query.contains("open bluetooth") || query.contains("bluetooth settings")) {
             launchSystemIntent(context, Settings.ACTION_BLUETOOTH_SETTINGS)
-            return CommandResult.Handled("Accessing Bluetooth protocols, Sir.")
+            return CommandResult.Handled("Bluetooth settings engaged, Sir.")
         }
         if (query.contains("open settings") || query.contains("system settings")) {
             launchSystemIntent(context, Settings.ACTION_SETTINGS)
-            return CommandResult.Handled("Launching system settings, Sir.")
+            return CommandResult.Handled("Launching master settings, Sir.")
         }
         if (query.contains("go home") || query.contains("home screen")) {
             val homeIntent = Intent(Intent.ACTION_MAIN).apply {
                 addCategory(Intent.CATEGORY_HOME)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
             }
             context.startActivity(homeIntent)
             return CommandResult.Handled("Navigating to home screen, Sir.")
         }
 
-        // 6. Dialer / Phone Call
-        if (query.contains("open dialer") || query.contains("open phone") || query.contains("call")) {
-            val dialIntent = Intent(Intent.ACTION_DIAL).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            }
-            context.startActivity(dialIntent)
-            return CommandResult.Handled("Phone dialer engaged, Sir.")
-        }
-
-        // 7. Camera Optics
+        // 6. Camera Optics
         if (query.contains("open camera") || query.contains("take photo")) {
             val cameraIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
@@ -102,23 +107,67 @@ object HardwareManager {
             }
         }
 
+        // 7. Phone Dialer
+        if (query.contains("open dialer") || query.contains("open phone") || query.contains("call")) {
+            val dialIntent = Intent(Intent.ACTION_DIAL).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(dialIntent)
+            return CommandResult.Handled("Phone dialer engaged, Sir.")
+        }
+
         // 8. Private WhatsApp/SMS Sentinel
         if (query.contains("message") || query.contains("who texted") || query.contains("read message")) {
             val brief = NotificationSentinelService.getLatestNotificationBrief()
             return CommandResult.Handled(brief)
         }
 
-        // 9. UNIVERSAL APP LAUNCHER (Opens ANY app installed on device: Instagram, Spotify, Chrome, Calculator, etc.)
+        // 9. DIRECT DEEP APP LAUNCHER (Instagram, WhatsApp, YouTube, and any installed app)
         if (query.startsWith("open ") || query.startsWith("launch ")) {
-            val targetAppName = query.removePrefix("open ").removePrefix("launch ").trim()
-            val launched = launchAppByName(context, targetAppName)
-            if (launched) {
-                return CommandResult.Handled("Opening $targetAppName now, Sir.")
+            val targetName = query.removePrefix("open ").removePrefix("launch ").trim()
+            val launched = launchApplication(context, targetName)
+            return if (launched) {
+                CommandResult.Handled("Opening $targetName now, Sir.")
+            } else {
+                CommandResult.Handled("Sir, $targetName is not installed on this device.")
             }
         }
 
-        // If not a hardware command, route query to Groq LLaMA
+        // If not a hardware command, pass to Nex AI with full Conversational Memory
         return CommandResult.PassToAI(rawQuery)
+    }
+
+    private fun launchApplication(context: Context, appName: String): Boolean {
+        val pm = context.packageManager
+
+        // 1. Check direct popular mapping (Instant & Reliable)
+        val knownPackage = POPULAR_APPS[appName]
+        if (knownPackage != null) {
+            val intent = pm.getLaunchIntentForPackage(knownPackage)
+            if (intent != null) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+                context.startActivity(intent)
+                return true
+            }
+        }
+
+        // 2. Dynamic scan of all installed applications
+        try {
+            val packages = pm.getInstalledApplications(0)
+            for (app in packages) {
+                val label = pm.getApplicationLabel(app).toString().lowercase(Locale.ROOT)
+                if (label == appName || label.contains(appName)) {
+                    val launchIntent = pm.getLaunchIntentForPackage(app.packageName)
+                    if (launchIntent != null) {
+                        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+                        context.startActivity(launchIntent)
+                        return true
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        return false
     }
 
     private fun toggleTorch(context: Context, turnOn: Boolean): String {
@@ -160,29 +209,8 @@ object HardwareManager {
 
     private fun launchSystemIntent(context: Context, action: String) {
         val intent = Intent(action).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
         }
         context.startActivity(intent)
-    }
-
-    private fun launchAppByName(context: Context, appName: String): Boolean {
-        val pm = context.packageManager
-        val packages = pm.getInstalledApplications(0)
-
-        for (app in packages) {
-            if ((app.flags and ApplicationInfo.FLAG_SYSTEM) != 0 && pm.getLaunchIntentForPackage(app.packageName) == null) {
-                continue
-            }
-            val label = pm.getApplicationLabel(app).toString().lowercase(Locale.ROOT)
-            if (label == appName || label.contains(appName)) {
-                val launchIntent = pm.getLaunchIntentForPackage(app.packageName)
-                if (launchIntent != null) {
-                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    context.startActivity(launchIntent)
-                    return true
-                }
-            }
-        }
-        return false
     }
 }
