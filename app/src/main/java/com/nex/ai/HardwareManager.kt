@@ -21,7 +21,6 @@ sealed class CommandResult {
 
 object HardwareManager {
 
-    // Direct Package Mapping for Instant 100% Launch Reliability
     private val POPULAR_APPS = mapOf(
         "instagram" to "com.instagram.android",
         "whatsapp" to "com.whatsapp",
@@ -35,10 +34,38 @@ object HardwareManager {
         "calculator" to "com.google.android.calculator"
     )
 
+    private val WAKE_RESPONSES = listOf(
+        "Yes, Sir? Standing by.",
+        "At your service, Sir. What are your orders?",
+        "Online and listening, Sir.",
+        "All systems nominal, Sir. How may I assist you?"
+    )
+
     fun processVoiceCommand(context: Context, rawQuery: String): CommandResult {
         val query = rawQuery.lowercase(Locale.ROOT).trim()
 
-        // 1. Flashlight / Torch Controls
+        // 1. INSTANT WAKE-WORD & NAME TRIGGER ("Nex", "Hey Nex", "Next", "Nex suno")
+        val isCallingNex = query == "nex" ||
+                query == "next" ||
+                query == "necks" ||
+                query.startsWith("hey nex") ||
+                query.startsWith("hello nex") ||
+                query.startsWith("hi nex") ||
+                query.startsWith("nex ") ||
+                query.endsWith(" nex") ||
+                query.contains("nex suno") ||
+                query.contains("suno nex")
+
+        if (isCallingNex && query.length < 20) {
+            return CommandResult.Handled(WAKE_RESPONSES.random())
+        }
+
+        // Who are you / Identity Check
+        if (query.contains("who are you") || query.contains("what is your name") || query.contains("tum kaun ho")) {
+            return CommandResult.Handled("I am Nex, your personal artificial intelligence, Sir.")
+        }
+
+        // 2. Flashlight / Torch Controls
         if (query.contains("torch on") || query.contains("flashlight on") || query.contains("turn on torch") || query.contains("turn on light")) {
             return CommandResult.Handled(toggleTorch(context, true))
         }
@@ -46,7 +73,7 @@ object HardwareManager {
             return CommandResult.Handled(toggleTorch(context, false))
         }
 
-        // 2. Volume Controls
+        // 3. Volume Controls
         if (query.contains("volume up") || query.contains("increase volume") || query.contains("louder")) {
             return CommandResult.Handled(adjustVolume(context, AudioManager.ADJUST_RAISE))
         }
@@ -60,19 +87,19 @@ object HardwareManager {
             return CommandResult.Handled(setMaxVolume(context))
         }
 
-        // 3. Battery Status
+        // 4. Battery Status
         if (query.contains("battery") || query.contains("charge level") || query.contains("power level")) {
             val batteryLevel = getBatteryPercentage(context)
             return CommandResult.Handled("Sir, current power level is at $batteryLevel percent.")
         }
 
-        // 4. Exact Time Check
+        // 5. Exact Time Check
         if (query.contains("time") || query.contains("what time is it") || query.contains("clock")) {
             val currentTime = SimpleDateFormat("hh:mm a", Locale.UK).format(Date())
             return CommandResult.Handled("It is currently $currentTime, Sir.")
         }
 
-        // 5. System Quick Settings / Navigation
+        // 6. System Quick Settings / Navigation
         if (query.contains("open wifi") || query.contains("wifi settings")) {
             launchSystemIntent(context, Settings.ACTION_WIFI_SETTINGS)
             return CommandResult.Handled("Accessing Wi-Fi protocols, Sir.")
@@ -94,7 +121,7 @@ object HardwareManager {
             return CommandResult.Handled("Navigating to home screen, Sir.")
         }
 
-        // 6. Camera Optics
+        // 7. Camera Optics
         if (query.contains("open camera") || query.contains("take photo")) {
             val cameraIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
@@ -107,7 +134,7 @@ object HardwareManager {
             }
         }
 
-        // 7. Phone Dialer
+        // 8. Phone Dialer
         if (query.contains("open dialer") || query.contains("open phone") || query.contains("call")) {
             val dialIntent = Intent(Intent.ACTION_DIAL).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
@@ -116,13 +143,13 @@ object HardwareManager {
             return CommandResult.Handled("Phone dialer engaged, Sir.")
         }
 
-        // 8. Private WhatsApp/SMS Sentinel
+        // 9. Private WhatsApp/SMS Sentinel
         if (query.contains("message") || query.contains("who texted") || query.contains("read message")) {
             val brief = NotificationSentinelService.getLatestNotificationBrief()
             return CommandResult.Handled(brief)
         }
 
-        // 9. DIRECT DEEP APP LAUNCHER (Instagram, WhatsApp, YouTube, and any installed app)
+        // 10. DIRECT DEEP APP LAUNCHER (Instagram, WhatsApp, YouTube, and any installed app)
         if (query.startsWith("open ") || query.startsWith("launch ")) {
             val targetName = query.removePrefix("open ").removePrefix("launch ").trim()
             val launched = launchApplication(context, targetName)
@@ -139,8 +166,6 @@ object HardwareManager {
 
     private fun launchApplication(context: Context, appName: String): Boolean {
         val pm = context.packageManager
-
-        // 1. Check direct popular mapping (Instant & Reliable)
         val knownPackage = POPULAR_APPS[appName]
         if (knownPackage != null) {
             val intent = pm.getLaunchIntentForPackage(knownPackage)
@@ -151,7 +176,6 @@ object HardwareManager {
             }
         }
 
-        // 2. Dynamic scan of all installed applications
         try {
             val packages = pm.getInstalledApplications(0)
             for (app in packages) {
