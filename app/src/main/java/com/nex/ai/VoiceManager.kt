@@ -41,7 +41,6 @@ class VoiceManager(
             if (status == TextToSpeech.SUCCESS) {
                 isTtsReady = true
 
-                // CRITICAL FOR BACKGROUND AUDIO: Grants Assistant-level rights to play audio when screen is OFF
                 val audioAttributes = AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
@@ -50,14 +49,13 @@ class VoiceManager(
 
                 textToSpeech?.language = Locale.UK
 
-                // Auto-select female British FRIDAY voice
                 textToSpeech?.voices?.firstOrNull { voice ->
                     voice.locale.language == "en" &&
                     (voice.name.contains("female", ignoreCase = true) || voice.name.contains("en-gb", ignoreCase = true))
                 }?.let { textToSpeech?.voice = it }
 
                 textToSpeech?.setPitch(1.05f)
-                textToSpeech?.setSpeechRate(0.98f)
+                textToSpeech?.setSpeechRate(1.02f) // Crisp and fast response rate
 
                 textToSpeech?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {
@@ -71,7 +69,7 @@ class VoiceManager(
                         if (isContinuousMode) {
                             mainHandler.postDelayed({
                                 startListening()
-                            }, 350)
+                            }, 250) // Fast 250ms cadence recovery
                         }
                     }
 
@@ -80,7 +78,7 @@ class VoiceManager(
                         isSpeaking = false
                         onStateUpdate("IDLE", "Standing by.")
                         if (isContinuousMode) {
-                            mainHandler.postDelayed({ startListening() }, 500)
+                            mainHandler.postDelayed({ startListening() }, 400)
                         }
                     }
                 })
@@ -134,11 +132,10 @@ class VoiceManager(
                         }
 
                         override fun onError(error: Int) {
-                            // Seamless re-arming in continuous mode
                             if (isContinuousMode && !isSpeaking) {
                                 mainHandler.postDelayed({
                                     startListening()
-                                }, 450)
+                                }, 350)
                             } else {
                                 onStateUpdate("IDLE", "Standing by.")
                             }
@@ -152,7 +149,7 @@ class VoiceManager(
                                 onSpeechRecognized(query)
                             } else {
                                 if (isContinuousMode) {
-                                    mainHandler.postDelayed({ startListening() }, 350)
+                                    mainHandler.postDelayed({ startListening() }, 300)
                                 }
                             }
                         }
@@ -162,20 +159,21 @@ class VoiceManager(
                     })
                 }
 
-                // Bilingual Indian English + Hindi Speech Recognizer
+                // TURBO LATENCY: Drops silence timeout from 1500ms down to 750ms for instant handoff
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-IN")
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "en-IN")
                     putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf("hi-IN", "en-US"))
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 750L)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 750L)
                 }
 
                 speechRecognizer?.startListening(intent)
             } catch (e: Exception) {
                 if (isContinuousMode) {
-                    mainHandler.postDelayed({ startListening() }, 1000)
+                    mainHandler.postDelayed({ startListening() }, 800)
                 }
             }
         }
@@ -189,7 +187,6 @@ class VoiceManager(
 
         mainHandler.post {
             stopListening()
-            // High-priority audio parameters to guarantee sound output in background & screen off
             val params = Bundle().apply {
                 putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "NEX_SPEECH_ID")
                 putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
